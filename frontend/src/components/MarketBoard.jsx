@@ -1,3 +1,5 @@
+import { useRef } from 'react'
+
 function buildSmoothPath(points) {
   if (!points.length) return ''
   if (points.length === 1) return `M${points[0].x.toFixed(2)},${points[0].y.toFixed(2)}`
@@ -37,8 +39,43 @@ function Sparkline({ points, trendUp }) {
 }
 
 export default function MarketBoard({ rows }) {
+  const boardRef = useRef(null)
+  const frameRef = useRef(0)
+
+  const handleMove = (event) => {
+    const board = boardRef.current
+    if (!board) return
+
+    const rect = board.getBoundingClientRect()
+    const offsetX = event.clientX - rect.left
+    const offsetY = event.clientY - rect.top
+    const px = offsetX / rect.width - 0.5
+    const py = offsetY / rect.height - 0.5
+    const rotateY = px * 5.2
+    const rotateX = py * -5.2
+
+    if (frameRef.current) cancelAnimationFrame(frameRef.current)
+    frameRef.current = requestAnimationFrame(() => {
+      board.style.setProperty('--tilt-rotate-x', `${rotateX.toFixed(2)}deg`)
+      board.style.setProperty('--tilt-rotate-y', `${rotateY.toFixed(2)}deg`)
+      board.style.setProperty('--tilt-glow-x', `${(offsetX / rect.width) * 100}%`)
+      board.style.setProperty('--tilt-glow-y', `${(offsetY / rect.height) * 100}%`)
+    })
+  }
+
+  const handleLeave = () => {
+    const board = boardRef.current
+    if (!board) return
+    if (frameRef.current) cancelAnimationFrame(frameRef.current)
+
+    board.style.setProperty('--tilt-rotate-x', '0deg')
+    board.style.setProperty('--tilt-rotate-y', '0deg')
+    board.style.setProperty('--tilt-glow-x', '50%')
+    board.style.setProperty('--tilt-glow-y', '32%')
+  }
+
   return (
-    <div className="market-board">
+    <div className="market-board" ref={boardRef} onMouseMove={handleMove} onMouseLeave={handleLeave}>
       <div className="market-header">
         <div>Asset</div>
         <div>Price</div>
@@ -80,3 +117,4 @@ export default function MarketBoard({ rows }) {
     </div>
   )
 }
+

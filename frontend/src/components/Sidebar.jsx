@@ -1,6 +1,6 @@
 const NAV_ITEMS = [
   { key: 'markets', label: 'Markets', index: '01' },
-  { key: 'overview', label: 'Overview', index: '02' },
+  { key: 'agents', label: 'Agents', index: '02' },
   { key: 'policy', label: 'Policy', index: '03' },
   { key: 'projects', label: 'Projects', index: '04' },
   { key: 'research', label: 'Research', index: '05' },
