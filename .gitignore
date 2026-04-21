@@ -13,3 +13,8 @@ backend/chroma/
 
 .DS_Store
 Thumbs.db
+
+frontend.log
+frontend.pid
+backend.log
+backend/backend.log
