@@ -38,9 +38,15 @@ function Sparkline({ points, trendUp }) {
   )
 }
 
-export default function MarketBoard({ rows }) {
+const HEADERS = {
+  en: ['Asset', 'Price', '24h', 'Trend', '24h Range', 'Market Cap'],
+  zh: ['资产', '价格', '24小时', '趋势', '24小时区间', '市值'],
+}
+
+export default function MarketBoard({ rows, language }) {
   const boardRef = useRef(null)
   const frameRef = useRef(0)
+  const headers = HEADERS[language] || HEADERS.en
 
   const handleMove = (event) => {
     const board = boardRef.current
@@ -76,13 +82,11 @@ export default function MarketBoard({ rows }) {
 
   return (
     <div className="market-board" ref={boardRef} onMouseMove={handleMove} onMouseLeave={handleLeave}>
+      <div className="market-board-sheen" aria-hidden="true" />
       <div className="market-header">
-        <div>Asset</div>
-        <div>Price</div>
-        <div>24h</div>
-        <div>Trend</div>
-        <div>24h Range</div>
-        <div>Market Cap</div>
+        {headers.map((header) => (
+          <div key={header}>{header}</div>
+        ))}
       </div>
       <div className="market-rows">
         {rows.map((coin) => {
@@ -117,4 +121,3 @@ export default function MarketBoard({ rows }) {
     </div>
   )
 }
-

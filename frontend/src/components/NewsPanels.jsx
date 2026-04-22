@@ -1,17 +1,38 @@
-function NewsColumn({ title, kicker, items }) {
+const COPY = {
+  en: {
+    xWatch: 'X Watch',
+    social: 'Social commentary',
+    finance: 'Finance News',
+    latest: 'Latest headlines',
+    updated: 'Updated every five hours. Scroll inside this panel to browse the latest items without stretching the whole page.',
+    fallback: 'Open the source for the full thread or article.',
+    source: 'Source',
+  },
+  zh: {
+    xWatch: 'X 动态',
+    social: '社交评论',
+    finance: '财经新闻',
+    latest: '最新标题',
+    updated: '每五小时更新一次。可以直接在这个面板里滚动查看，而不用拉长整个页面。',
+    fallback: '打开原文查看完整帖子或文章。',
+    source: '来源',
+  },
+}
+
+function NewsColumn({ title, kicker, items, copy }) {
   return (
     <section className="market-news-card">
       <div className="market-news-kicker">{kicker}</div>
       <div className="market-news-title">{title}</div>
-      <div className="market-news-copy">Updated every five hours. Scroll inside this panel to browse the latest items without stretching the whole page.</div>
+      <div className="market-news-copy">{copy.updated}</div>
       <div className="market-news-list">
         {items.map((item, index) => (
           <a className="market-news-item" href={item.url} target="_blank" rel="noreferrer" key={`${title}-${index}`}>
             <div className="market-news-item-title">{item.title}</div>
-            <div className="market-news-item-copy">{item.summary || 'Open the source for the full thread or article.'}</div>
+            <div className="market-news-item-copy">{item.summary || copy.fallback}</div>
             <div className="market-news-item-meta">
-              {item.source || 'Source'}
-              {item.published_at ? ` 路 ${item.published_at}` : ''}
+              {item.source || copy.source}
+              {item.published_at ? ` · ${item.published_at}` : ''}
             </div>
           </a>
         ))}
@@ -20,11 +41,13 @@ function NewsColumn({ title, kicker, items }) {
   )
 }
 
-export default function NewsPanels({ briefs }) {
+export default function NewsPanels({ briefs, language }) {
+  const copy = COPY[language] || COPY.en
+
   return (
     <div className="market-news-grid">
-      <NewsColumn title="X Watch" kicker="Social commentary" items={briefs.social} />
-      <NewsColumn title="Finance News" kicker="Latest headlines" items={briefs.news} />
+      <NewsColumn title={copy.xWatch} kicker={copy.social} items={briefs.social} copy={copy} />
+      <NewsColumn title={copy.finance} kicker={copy.latest} items={briefs.news} copy={copy} />
     </div>
   )
 }

@@ -1,14 +1,39 @@
-const NAV_ITEMS = [
-  { key: 'markets', label: 'Markets', index: '01' },
-  { key: 'agents', label: 'Agents', index: '02' },
-  { key: 'policy', label: 'Policy', index: '03' },
-  { key: 'projects', label: 'Projects', index: '04' },
-  { key: 'research', label: 'Research', index: '05' },
-]
+import { useRef } from 'react'
+import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
 
-export default function Sidebar({ activeView, onSelect }) {
+const NAV_ITEMS = {
+  en: [
+    { key: 'markets', label: 'Markets', index: '01' },
+    { key: 'agents', label: 'meme pump', index: '02' },
+    { key: 'policy', label: '', index: '03' },
+    { key: 'projects', label: '', index: '04' },
+    { key: 'research', label: 'Setting', index: '05' },
+  ],
+  zh: [
+    { key: 'markets', label: '市场', index: '01' },
+    { key: 'agents', label: 'meme pump', index: '02' },
+    { key: 'policy', label: '', index: '03' },
+    { key: 'projects', label: '', index: '04' },
+    { key: 'research', label: '设置', index: '05' },
+  ],
+}
+
+export default function Sidebar({ activeView, onSelect, language }) {
+  const items = NAV_ITEMS[language] || NAV_ITEMS.en
+  const sidebarSpriteTrackRef = useRef(null)
+  const sidebarSpriteShellRef = useRef(null)
+
+  useSpriteOrbit([
+    { trackRef: sidebarSpriteTrackRef, shellRef: sidebarSpriteShellRef, direction: 1 },
+  ])
+
   return (
     <aside className="workspace-sidebar">
+      <div className="sidebar-pepe-track" ref={sidebarSpriteTrackRef} aria-hidden="true">
+        <div className="pepe-shell facing-right" ref={sidebarSpriteShellRef}>
+          <div className="sidebar-pepe" />
+        </div>
+      </div>
       <div className="brand-mark">
         <div>
           <div className="brand-title">Elephant Jungle</div>
@@ -17,7 +42,7 @@ export default function Sidebar({ activeView, onSelect }) {
       </div>
 
       <div className="nav-list">
-        {NAV_ITEMS.map((item) => (
+        {items.map((item) => (
           <button
             key={item.key}
             className={`nav-item ${activeView === item.key ? 'active' : ''}`}

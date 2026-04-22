@@ -1,115 +1,149 @@
-const conceptSeeds = [
-  { label: 'Concept', value: 'Cult meme launcher with fast narrative loops' },
-  { label: 'Ticker', value: '$BOLT' },
-  { label: 'Slogan', value: 'Blink once. The jungle already moved.' },
-]
-
-const signalRows = [
-  { label: 'Heat map', value: 'Meme + AI + jungle mascot' },
-  { label: 'Audience', value: 'Crypto Twitter natives, short-form traders' },
-  { label: 'Visual', value: 'Pixel mascot, orange ember, low-fi chaos' },
-]
-
-const safetyRows = [
-  'Avoid celebrity likeness, brand theft, and fake partnership claims.',
-  'Frame it as satire or community culture, not guaranteed profit language.',
-  'Keep launch steps simulated until legal, chain, and treasury review are done.',
-]
-
-function PlaceholderPanel({ kicker, title, copy }) {
-  return (
-    <section className="agent-card agent-card-placeholder">
-      <div className="agent-kicker">{kicker}</div>
-      <h3 className="agent-title">{title}</h3>
-      <p className="agent-copy">{copy}</p>
-    </section>
-  )
+const COPY = {
+  en: {
+    title: 'Set the token fields and launch parameters.',
+    name: 'Name',
+    symbol: 'Symbol',
+    description: 'Description',
+    twitter: 'Twitter',
+    telegram: 'Telegram',
+    website: 'Website',
+    image: 'Image',
+    mintWallet: 'Mint Wallet',
+    signerWallet: 'Signer Wallet',
+    buyAmount: 'Buy Amount',
+    amountMode: 'Amount Mode',
+    slippage: 'Slippage %',
+    priorityFee: 'Priority Fee',
+    pool: 'Pool',
+    showName: 'Show Name',
+    build: 'Build launch payload',
+    save: 'Save preset',
+    descriptionPlaceholder: 'Short token story, launch angle, and meme context.',
+    imagePlaceholder: 'Token image upload path / URL',
+    mintPlaceholder: 'Fresh mint keypair public key',
+    signerPlaceholder: 'Funding wallet public key',
+    percentage: '% of supply',
+    trueLabel: 'True',
+    falseLabel: 'False',
+  },
+  zh: {
+    title: '设置代币字段和发币参数。',
+    name: '名称',
+    symbol: '简称',
+    description: '描述',
+    twitter: 'Twitter',
+    telegram: 'Telegram',
+    website: '网站',
+    image: '图片',
+    mintWallet: 'Mint 钱包',
+    signerWallet: '签名钱包',
+    buyAmount: '买入数量',
+    amountMode: '数量模式',
+    slippage: '滑点 %',
+    priorityFee: '优先费',
+    pool: '池子',
+    showName: '显示名称',
+    build: '生成发币参数',
+    save: '保存预设',
+    descriptionPlaceholder: '填写代币简介、发币角度和 meme 叙事。',
+    imagePlaceholder: '代币图片上传路径 / URL',
+    mintPlaceholder: '新的 mint 公钥',
+    signerPlaceholder: '出资钱包公钥',
+    percentage: '供应量百分比',
+    trueLabel: '是',
+    falseLabel: '否',
+  },
 }
 
-export default function AgentsView() {
+export default function AgentsView({ language }) {
+  const copy = COPY[language] || COPY.en
+
   return (
-    <div className="workspace-view active">
-      <div className="agents-grid">
-        <section className="agent-card meme-agent-card">
-          <div className="agent-kicker">Meme Lab Agent</div>
+    <div className="workspace-view active agents-launch-view">
+      <div className="agents-launch-shell">
+        <div className="launch-builder-head launch-builder-head-simple">
+          <div>
+            <h2 className="launch-builder-title">{copy.title}</h2>
+          </div>
+        </div>
 
-          <div className="agent-topline">
-            <div>
-              <h2 className="agent-hero">Prototype a meme coin idea without turning it into a launch tool.</h2>
-              <p className="agent-copy">
-                This panel is for concept shaping, narrative testing, visual direction, and safety review. It helps us
-                pressure-test whether a meme project is interesting before anything moves on-chain.
-              </p>
-            </div>
-
-            <div className="agent-score-block">
-              <span className="agent-score-label">Viability</span>
-              <span className="agent-score-value">78</span>
-              <span className="agent-score-note">Playful, sticky, but still needs a cleaner community hook.</span>
-            </div>
+        <section className="launch-form-card launch-form-card-compact">
+          <div className="launch-form-grid">
+            <label className="launch-input-group">
+              <span>{copy.name}</span>
+              <input type="text" placeholder="Jungle Spark" />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.symbol}</span>
+              <input type="text" placeholder="JSPRK" />
+            </label>
+            <label className="launch-input-group launch-input-group-wide">
+              <span>{copy.description}</span>
+              <textarea rows="4" placeholder={copy.descriptionPlaceholder} />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.twitter}</span>
+              <input type="text" placeholder="https://x.com/..." />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.telegram}</span>
+              <input type="text" placeholder="https://t.me/..." />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.website}</span>
+              <input type="text" placeholder="https://..." />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.image}</span>
+              <input type="text" placeholder={copy.imagePlaceholder} />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.mintWallet}</span>
+              <input type="text" placeholder={copy.mintPlaceholder} />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.signerWallet}</span>
+              <input type="text" placeholder={copy.signerPlaceholder} />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.buyAmount}</span>
+              <input type="text" placeholder="0.05" />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.amountMode}</span>
+              <select defaultValue="sol">
+                <option value="sol">SOL</option>
+                <option value="percentage">{copy.percentage}</option>
+              </select>
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.slippage}</span>
+              <input type="text" placeholder="10" />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.priorityFee}</span>
+              <input type="text" placeholder="0.003" />
+            </label>
+            <label className="launch-input-group">
+              <span>{copy.pool}</span>
+              <select defaultValue="pump">
+                <option value="pump">pump</option>
+              </select>
+            </label>
+            <label className="launch-input-group launch-toggle-group">
+              <span>{copy.showName}</span>
+              <div className="launch-toggle-row">
+                <button type="button" className="launch-toggle active">{copy.trueLabel}</button>
+                <button type="button" className="launch-toggle">{copy.falseLabel}</button>
+              </div>
+            </label>
           </div>
 
-          <div className="agent-section-grid">
-            <div className="agent-section">
-              <div className="agent-section-kicker">Core idea</div>
-              <div className="agent-pill-grid">
-                {conceptSeeds.map((item) => (
-                  <div className="agent-pill-card" key={item.label}>
-                    <span className="agent-pill-label">{item.label}</span>
-                    <span className="agent-pill-value">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="agent-section">
-              <div className="agent-section-kicker">Narrative signals</div>
-              <div className="agent-list">
-                {signalRows.map((item) => (
-                  <div className="agent-list-row" key={item.label}>
-                    <span className="agent-list-label">{item.label}</span>
-                    <span className="agent-list-value">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="agent-footer-grid">
-            <div className="agent-footer-panel">
-              <div className="agent-section-kicker">Output mock</div>
-              <p className="agent-copy">
-                Generate name, ticker, tagline, landing copy, launch moodboard, and a simulated token page brief for
-                internal review.
-              </p>
-            </div>
-
-            <div className="agent-footer-panel">
-              <div className="agent-section-kicker">Safety review</div>
-              <ul className="agent-safety-list">
-                {safetyRows.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
+          <div className="launch-action-row">
+            <button type="button" className="launch-primary-btn">{copy.build}</button>
+            <button type="button" className="launch-secondary-btn">{copy.save}</button>
           </div>
         </section>
-
-        <PlaceholderPanel
-          kicker="Agent 02"
-          title="Signal Watch"
-          copy="A future panel for monitoring live meme narratives, hot tags, and creator momentum before a concept gets pushed further."
-        />
-        <PlaceholderPanel
-          kicker="Agent 03"
-          title="Launch Filter"
-          copy="A future panel for simulated checklist logic, readiness gates, treasury assumptions, and operator review states."
-        />
-        <PlaceholderPanel
-          kicker="Agent 04"
-          title="Post Engine"
-          copy="A future panel for drafting launch copy, community voice variants, meme captions, and social posting sequences."
-        />
       </div>
     </div>
   )

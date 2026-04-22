@@ -11,9 +11,29 @@ def _must_env(name: str) -> str:
     return value
 
 
+def _get_chat_provider() -> str:
+    provider = os.getenv("CHAT_PROVIDER", "").strip().lower()
+    if provider:
+        return provider
+    if os.getenv("NVIDIA_API_KEY", "").strip():
+        return "nvidia"
+    return "minimax"
+
+
 def validate_provider_env() -> None:
     _must_env("DASHSCOPE_API_KEY")
-    _must_env("MINIMAX_API_KEY")
+    provider = _get_chat_provider()
+    if provider == "nvidia":
+        _must_env("NVIDIA_API_KEY")
+        return
+    if provider == "minimax":
+        _must_env("MINIMAX_API_KEY")
+        return
+    raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
+
+
+def _batched(items: list[str], size: int) -> list[list[str]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 def embed_texts(texts: Iterable[str]) -> list[list[float]]:
@@ -23,22 +43,28 @@ def embed_texts(texts: Iterable[str]) -> list[list[float]]:
         "ALI_EMBEDDING_URL",
         "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings",
     )
-    data = {"model": model, "input": list(texts)}
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    batch_size = int(os.getenv("ALI_EMBEDDING_BATCH_SIZE", "10"))
+    text_list = list(texts)
+    all_embeddings: list[list[float]] = []
 
     with httpx.Client(timeout=60) as client:
-        resp = client.post(url, headers=headers, json=data)
-        resp.raise_for_status()
-        payload = resp.json()
+        for batch in _batched(text_list, batch_size):
+            data = {"model": model, "input": batch}
+            resp = client.post(url, headers=headers, json=data)
+            resp.raise_for_status()
+            payload = resp.json()
 
-    items = payload.get("data", [])
-    embeddings = [item.get("embedding") for item in items]
-    if not embeddings or any(not isinstance(v, list) for v in embeddings):
-        raise RuntimeError(f"Bad embedding response: {payload}")
-    return embeddings
+            items = payload.get("data", [])
+            embeddings = [item.get("embedding") for item in items]
+            if not embeddings or any(not isinstance(v, list) for v in embeddings):
+                raise RuntimeError(f"Bad embedding response: {payload}")
+            all_embeddings.extend(embeddings)
+
+    return all_embeddings
 
 
-def _chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
+def _minimax_chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
     api_key = _must_env("MINIMAX_API_KEY")
     model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
     url = os.getenv(
@@ -65,6 +91,45 @@ def _chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
         if isinstance(content, str) and content.strip():
             return content.strip()
     raise RuntimeError(f"Bad MiniMax response: {payload}")
+
+
+def _nvidia_chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
+    api_key = _must_env("NVIDIA_API_KEY")
+    model = os.getenv("NVIDIA_MODEL", "z-ai/glm5")
+    url = os.getenv(
+        "NVIDIA_CHAT_URL",
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+    )
+    data = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": 1024,
+        "stream": False,
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(url, headers=headers, json=data)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    choices = payload.get("choices", [])
+    if choices:
+        message = choices[0].get("message", {})
+        content = message.get("content", "")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+    raise RuntimeError(f"Bad NVIDIA response: {payload}")
+
+
+def _chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
+    provider = _get_chat_provider()
+    if provider == "nvidia":
+        return _nvidia_chat_completion(messages, temperature=temperature)
+    if provider == "minimax":
+        return _minimax_chat_completion(messages, temperature=temperature)
+    raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
 
 
 def generate_answer(query: str, contexts: list[str]) -> str:
