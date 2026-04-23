@@ -29,11 +29,20 @@ function Sparkline({ points, trendUp }) {
     x: (index / Math.max(1, points.length - 1)) * width,
     y: height - (((point - min) / range) * (height - 8) + 4),
   }))
+  const linePath = buildSmoothPath(coords)
   const stroke = trendUp ? '#1d8f54' : '#b53333'
+  const dotId = `market-dot-${trendUp ? 'up' : 'down'}-${Math.round(points[0] || 0)}-${points.length}`
 
   return (
     <svg className="market-sparkline" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-      <path d={buildSmoothPath(coords)} fill="none" stroke={stroke} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path className="market-sparkline-glow" d={linePath} fill="none" stroke={stroke} strokeWidth="5.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path className="market-sparkline-line" d={linePath} fill="none" stroke={stroke} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" pathLength="100" />
+      <circle className="market-sparkline-dot" r="2.6" fill={stroke}>
+        <animateMotion dur="4.6s" repeatCount="indefinite" rotate="auto">
+          <mpath href={`#${dotId}`} />
+        </animateMotion>
+      </circle>
+      <path id={dotId} d={linePath} fill="none" stroke="transparent" strokeWidth="0" />
     </svg>
   )
 }
@@ -43,7 +52,7 @@ const HEADERS = {
   zh: ['资产', '价格', '24小时', '趋势', '24小时区间', '市值'],
 }
 
-export default function MarketBoard({ rows, language }) {
+export default function MarketBoard({ rows, language, onSelectCoin }) {
   const boardRef = useRef(null)
   const frameRef = useRef(0)
   const headers = HEADERS[language] || HEADERS.en
@@ -93,7 +102,7 @@ export default function MarketBoard({ rows, language }) {
           const trendUp = coin.change >= 0
           const fillWidth = trendUp ? 68 : 44
           return (
-            <div className="market-row" key={coin.symbol}>
+            <button className="market-row market-row-button" key={coin.symbol} type="button" onClick={() => onSelectCoin?.(coin)}>
               <div className="market-asset">
                 <div className="market-coin-mark">
                   {coin.image ? <img src={coin.image} alt={coin.symbol} /> : coin.symbol.slice(0, 2)}
@@ -114,7 +123,7 @@ export default function MarketBoard({ rows, language }) {
                 <div className="market-range-values"><span>{coin.low}</span><span>{coin.high}</span></div>
               </div>
               <div className="market-cap">{coin.cap}</div>
-            </div>
+            </button>
           )
         })}
       </div>

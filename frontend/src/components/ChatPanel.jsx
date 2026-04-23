@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
 
 const REQUEST_TIMEOUT_MS = 90000
@@ -12,10 +12,16 @@ const COPY = {
     thinkingFrames: ['T', 'Th', 'Thi', 'Thin', 'Think', 'Thinki', 'Thinkin', 'Thinking', 'Thinking.', 'Thinking..', 'Thinking...'],
     placeholder: 'Ask something...',
     send: 'Send',
-    requestFailed: 'request failed',
+    requestFailed: 'Request failed',
     noAnswer: 'No answer returned.',
     timeout: 'Request timed out, please retry.',
     backendError: 'Backend error',
+    imageOcr: 'Image OCR',
+    imageAttached: 'Ready to send',
+    ocrReading: 'Reading image...',
+    ocrReady: 'OCR ready',
+    ocrFailed: 'OCR failed',
+    ocrNoText: 'No text found in image.',
   },
   zh: {
     welcome: "Hello, I'm your Elephant Jungle assistant. 你好，请问需要什么帮助？",
@@ -29,10 +35,16 @@ const COPY = {
     noAnswer: '没有返回内容。',
     timeout: '请求超时，请重试。',
     backendError: '后端错误',
+    imageOcr: '图片识别',
+    imageAttached: '待发送',
+    ocrReading: '正在识别图片...',
+    ocrReady: '识别完成',
+    ocrFailed: '识别失败',
+    ocrNoText: '图片里没有识别到文字。',
   },
 }
 
-function createCopyIcon() {
+function CopyIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="9" y="9" width="10" height="10" rx="2" />
@@ -41,7 +53,7 @@ function createCopyIcon() {
   )
 }
 
-function createRetryIcon() {
+function RetryIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M20 11a8 8 0 1 0 2.2 5.5" />
@@ -50,12 +62,44 @@ function createRetryIcon() {
   )
 }
 
+function ImageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M21 19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10" />
+      <path d="M8.5 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+      <path d="m21 15-5-5L5 21" />
+      <path d="M17 3v6" />
+      <path d="M14 6h6" />
+    </svg>
+  )
+}
+
 function MessageActions({ copyLabel, copiedLabel, query, onRetry, retryLabel, text }) {
   const [copied, setCopied] = useState(false)
 
+  const fallbackCopy = (value) => {
+    const textarea = document.createElement('textarea')
+    textarea.value = value
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    textarea.style.pointerEvents = 'none'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const success = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return success
+  }
+
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(text)
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const success = fallbackCopy(text)
+        if (!success) throw new Error('fallback copy failed')
+      }
       setCopied(true)
       window.setTimeout(() => setCopied(false), 900)
     } catch (error) {
@@ -66,11 +110,11 @@ function MessageActions({ copyLabel, copiedLabel, query, onRetry, retryLabel, te
   return (
     <div className="msg-actions">
       <button className="msg-action-btn" type="button" onClick={copy}>
-        {createCopyIcon()}
+        <CopyIcon />
         <span className="msg-action-label">{copied ? copiedLabel : copyLabel}</span>
       </button>
       <button className="msg-action-btn" type="button" onClick={() => onRetry(query)}>
-        {createRetryIcon()}
+        <RetryIcon />
         <span className="msg-action-label">{retryLabel}</span>
       </button>
     </div>
@@ -82,6 +126,8 @@ export default function ChatPanel({ apiBase, language }) {
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const [ocrState, setOcrState] = useState(null)
+  const [selectedImageFile, setSelectedImageFile] = useState(null)
   const chatBoxRef = useRef(null)
   const chatSpriteTrackRef = useRef(null)
   const chatSpriteShellRef = useRef(null)
@@ -92,6 +138,7 @@ export default function ChatPanel({ apiBase, language }) {
   const activeRequestRef = useRef(null)
   const activeRunIdRef = useRef(0)
   const activeBotIdRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   const { spriteMode, boost, cruise } = useSpriteOrbit([
     { trackRef: chatSpriteTrackRef, shellRef: chatSpriteShellRef, direction: 1 },
@@ -115,6 +162,7 @@ export default function ChatPanel({ apiBase, language }) {
       didTimeout = true
       controller.abort()
     }, REQUEST_TIMEOUT_MS)
+
     try {
       const response = await fetch(`${apiBase}/chat`, {
         method: 'POST',
@@ -145,6 +193,54 @@ export default function ChatPanel({ apiBase, language }) {
     } finally {
       window.clearTimeout(timeoutId)
     }
+  }
+
+  const runImageOcr = async (file) => {
+    if (!file) return ''
+    boost()
+
+    const imageDataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error(copy.requestFailed))
+      reader.readAsDataURL(file)
+    })
+
+    const response = await fetch(`${apiBase}/ocr/image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image_data_url: imageDataUrl,
+        filename: file.name,
+      }),
+    })
+
+    if (!response.ok) {
+      let detail = copy.requestFailed
+      try {
+        const payload = await response.json()
+        detail = payload.detail || detail
+      } catch {
+        detail = `${detail} (${response.status})`
+      }
+      const normalized = String(detail || '')
+      if (
+        normalized.includes('Bad OCR response') ||
+        normalized.includes('OCR did not return readable text') ||
+        normalized.includes("'choices'") ||
+        normalized.includes('"choices"')
+      ) {
+        detail = copy.ocrNoText
+      }
+      throw new Error(detail)
+    }
+
+    const payload = await response.json()
+    const extractedText = (payload.text || '').trim()
+    if (!extractedText) {
+      throw new Error(copy.ocrNoText)
+    }
+    return extractedText
   }
 
   const streamAssistantText = (messageId, text, query, runId, options = {}) =>
@@ -244,12 +340,13 @@ export default function ChatPanel({ apiBase, language }) {
   }
 
   const sendQuery = async (query, retryMessageId = null) => {
-    if (!query.trim()) return
+    if (!query.trim() && !selectedImageFile) return
     interruptActiveReply()
     setIsStreaming(true)
     boost()
 
-    const userMessage = retryMessageId ? null : { id: `user-${Date.now()}`, role: 'user', text: query }
+    const userText = query.trim() || (selectedImageFile ? `[Image] ${selectedImageFile.name}` : query)
+    const userMessage = retryMessageId ? null : { id: `user-${Date.now()}`, role: 'user', text: userText }
     const botId = retryMessageId || `bot-${Date.now()}`
     const controller = new AbortController()
     const runId = activeRunIdRef.current
@@ -265,7 +362,7 @@ export default function ChatPanel({ apiBase, language }) {
           message.id === retryMessageId ? { ...message, text: frames[0], thinking: true } : message,
         )
       }
-      next.push({ id: botId, role: 'bot', text: frames[0], thinking: true, query })
+      next.push({ id: botId, role: 'bot', text: frames[0], thinking: true, query: userText })
       return next
     })
     scrollToBottom()
@@ -274,11 +371,23 @@ export default function ChatPanel({ apiBase, language }) {
     stopThinkingRef.current = stopThinking
 
     try {
-      const answer = await askBackend(query, controller)
+      let backendQuery = query
+      if (selectedImageFile) {
+        setOcrState({ name: selectedImageFile.name, status: 'loading' })
+        const extractedText = await runImageOcr(selectedImageFile)
+        setOcrState({ name: selectedImageFile.name, status: 'ready' })
+        backendQuery = query.trim()
+          ? `${query.trim()}\n\n[Image OCR]\n${extractedText}`
+          : `[Image OCR]\n${extractedText}`
+      }
+
+      const answer = await askBackend(backendQuery, controller)
       if (runId !== activeRunIdRef.current) return
       stopThinking()
       stopThinkingRef.current = null
-      await streamAssistantText(botId, answer, query, runId)
+      await streamAssistantText(botId, answer, backendQuery, runId)
+      setSelectedImageFile(null)
+      setOcrState(null)
     } catch (error) {
       if (error.name === 'AbortError') {
         return
@@ -286,6 +395,10 @@ export default function ChatPanel({ apiBase, language }) {
       if (runId !== activeRunIdRef.current) return
       stopThinking()
       stopThinkingRef.current = null
+      if (selectedImageFile) {
+        setSelectedImageFile(null)
+        setOcrState(null)
+      }
       await streamAssistantText(botId, `${copy.backendError}: ${error.message}`, query, runId)
     } finally {
       if (activeRequestRef.current === controller) {
@@ -313,20 +426,20 @@ export default function ChatPanel({ apiBase, language }) {
           {messages
             .filter((message) => !(message.hiddenWhilePending && !message.text.trim()))
             .map((message) => (
-            <div className={`msg ${message.role} ${message.role === 'bot' ? 'assistant' : ''}`} key={message.id}>
-              <div className={`msg-content ${message.thinking ? 'thinking-inline' : ''}`}>{message.text}</div>
-              {message.role === 'bot' && !message.thinking && !message.hideActions && message.text.trim() ? (
-                <MessageActions
-                  copyLabel={copy.copy}
-                  copiedLabel={copy.copied}
-                  query={message.query}
-                  retryLabel={copy.retry}
-                  text={message.text}
-                  onRetry={(query) => sendQuery(query, message.id)}
-                />
-              ) : null}
-            </div>
-          ))}
+              <div className={`msg ${message.role} ${message.role === 'bot' ? 'assistant' : ''}`} key={message.id}>
+                <div className={`msg-content ${message.thinking ? 'thinking-inline' : ''}`}>{message.text}</div>
+                {message.role === 'bot' && !message.thinking && !message.hideActions && message.text.trim() ? (
+                  <MessageActions
+                    copyLabel={copy.copy}
+                    copiedLabel={copy.copied}
+                    query={message.query}
+                    retryLabel={copy.retry}
+                    text={message.text}
+                    onRetry={(nextQuery) => sendQuery(nextQuery, message.id)}
+                  />
+                ) : null}
+              </div>
+            ))}
         </div>
       </div>
       <div className="input-row">
@@ -336,27 +449,75 @@ export default function ChatPanel({ apiBase, language }) {
               <div className={`sprite-avatar ${spriteMode}`} />
             </div>
           </div>
-          <input
-            type="text"
-            value={inputValue}
-            placeholder={copy.placeholder}
-            onChange={(event) => {
-              setInputValue(event.target.value)
-              boost()
-            }}
-            onBlur={cruise}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                const query = inputValue
-                setInputValue('')
-                sendQuery(query)
-              }
-            }}
-          />
+          <div className="chat-input-shell">
+            <button
+              className="image-ocr-button"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              title={copy.imageOcr}
+            >
+              <ImageIcon />
+            </button>
+            <input
+              ref={fileInputRef}
+              className="image-ocr-input"
+              type="file"
+              accept="image/*"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (!file) return
+                setSelectedImageFile(file)
+                setOcrState({ name: file.name, status: 'attached' })
+                event.target.value = ''
+              }}
+            />
+            <input
+              type="text"
+              value={inputValue}
+              placeholder={copy.placeholder}
+              onChange={(event) => {
+                setInputValue(event.target.value)
+                boost()
+              }}
+              onBlur={cruise}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  const query = inputValue
+                  setInputValue('')
+                  sendQuery(query)
+                }
+              }}
+            />
+          </div>
+          {ocrState ? (
+            <div className={`ocr-float ${ocrState.status}`} title={ocrState.name}>
+              <span className="ocr-float-count">1</span>
+              <span className="ocr-float-label">
+                {ocrState.status === 'attached'
+                  ? copy.imageAttached
+                  : ocrState.status === 'loading'
+                    ? copy.ocrReading
+                    : ocrState.status === 'ready'
+                      ? copy.ocrReady
+                      : copy.ocrFailed}
+              </span>
+              <button
+                type="button"
+                className="ocr-float-clear"
+                onClick={() => {
+                  setOcrState(null)
+                  setSelectedImageFile(null)
+                }}
+              >
+                x
+              </button>
+            </div>
+          ) : null}
         </div>
         <button
           className="send-button"
           type="button"
+          disabled={isStreaming && !inputValue.trim() && !selectedImageFile}
           onClick={() => {
             const query = inputValue
             setInputValue('')
@@ -369,3 +530,4 @@ export default function ChatPanel({ apiBase, language }) {
     </div>
   )
 }
+

@@ -45,6 +45,7 @@ body[data-theme='dark'] {
 }
 
 body {
+  position: relative;
   min-height: 100vh;
   background: var(--bg-page);
   color: var(--text-primary);
@@ -54,9 +55,48 @@ body {
   overflow: hidden;
 }
 
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-repeat: repeat;
+  image-rendering: pixelated;
+  will-change: transform, opacity;
+}
+
+body::before {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--accent) 32%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--accent) 18%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--text-primary) 18%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--text-primary) 10%, transparent) 0 0);
+  background-size: 5px 5px, 2px 2px, 1px 1px, 3px 3px;
+  background-position: 18px 22px, 71px 49px, 126px 15px, 204px 77px;
+  opacity: 0.16;
+  z-index: 0;
+  animation: pixel-drift-a 42s linear infinite;
+}
+
+body::after {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--text-primary) 12%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--accent) 14%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--text-primary) 8%, transparent) 0 0);
+  background-size: 7px 7px, 1px 1px, 3px 3px, 2px 2px;
+  background-position: 43px 36px, 98px 92px, 173px 28px, 241px 64px;
+  opacity: 0.1;
+  z-index: 0;
+  animation: pixel-drift-b 56s linear infinite reverse;
+}
+
 button, input { font: inherit; }
 
 .layout {
+  position: relative;
+  z-index: 1;
   display: flex;
   height: 100vh;
   overflow: hidden;
@@ -64,7 +104,7 @@ button, input { font: inherit; }
 
 .main {
   flex: 1;
-  padding: 28px 20px 28px 28px;
+  padding: 24px 16px 24px 24px;
   min-width: 0;
   height: 100vh;
   overflow: hidden;
@@ -73,8 +113,8 @@ button, input { font: inherit; }
 .workspace-shell {
   height: calc(100vh - 56px);
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 20px;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 16px;
 }
 
 .workspace-sidebar {
@@ -206,7 +246,7 @@ button, input { font: inherit; }
   border: 1px solid var(--border-soft);
   border-radius: 32px;
   box-shadow: 0 4px 24px var(--shadow-soft);
-  padding: 34px 34px 28px;
+  padding: 28px 28px 24px;
   height: 100%;
   min-width: 0;
   display: flex;
@@ -782,6 +822,7 @@ button, input { font: inherit; }
   flex-direction: column;
   gap: 18px;
   min-height: 0;
+  width: 100%;
 }
 
 .market-shell-atmosphere {
@@ -811,21 +852,26 @@ button, input { font: inherit; }
 
 .market-pixel-haze::before {
   background-image:
-    radial-gradient(circle at center, color-mix(in srgb, var(--accent) 24%, transparent) 0 1px, transparent 1px),
-    radial-gradient(circle at center, color-mix(in srgb, var(--text-primary) 9%, transparent) 0 1px, transparent 1px);
-  background-size: 26px 26px, 38px 38px;
-  background-position: 0 0, 14px 18px;
-  opacity: 0.16;
+    linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--accent) 12%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--text-primary) 10%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--text-primary) 7%, transparent) 0 0);
+  background-size: 3px 3px, 1px 1px, 2px 2px, 1px 1px;
+  background-position: 12px 18px, 47px 31px, 29px 56px, 71px 14px;
+  opacity: 0.12;
   animation: pixel-drift-a 26s linear infinite;
 }
 
 .market-pixel-haze::after {
   background-image:
-    linear-gradient(color-mix(in srgb, var(--accent) 18%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 7%, transparent) 0 0);
-  background-size: 2px 2px, 1px 1px;
-  background-position: 8px 10px, 20px 24px;
-  opacity: 0.06;
+    linear-gradient(color-mix(in srgb, var(--accent) 16%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--text-primary) 8%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--text-primary) 5%, transparent) 0 0),
+    linear-gradient(color-mix(in srgb, var(--accent) 8%, transparent) 0 0);
+  background-size: 5px 5px, 2px 2px, 1px 1px, 3px 3px, 1px 1px;
+  background-position: 24px 22px, 63px 77px, 91px 43px, 138px 19px, 177px 68px;
+  opacity: 0.08;
   transform: scale(1.02);
   animation: pixel-drift-b 34s linear infinite reverse;
 }
@@ -841,8 +887,8 @@ button, input { font: inherit; }
   --tilt-glow-x: 50%;
   --tilt-glow-y: 32%;
   position: relative;
-  max-width: 900px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   width: 100%;
   background: color-mix(in srgb, var(--bg-toggle-active) 50%, var(--bg-surface));
   border: 1px solid var(--border-soft);
@@ -872,10 +918,15 @@ button, input { font: inherit; }
   background:
     radial-gradient(circle at var(--tilt-glow-x) var(--tilt-glow-y), color-mix(in srgb, #ffffff 52%, transparent), transparent 30%),
     linear-gradient(120deg, transparent 20%, color-mix(in srgb, var(--accent) 18%, transparent) 48%, transparent 72%);
-  opacity: 0.42;
+  opacity: 0;
   transform: translateZ(30px);
   mix-blend-mode: screen;
-  transition: opacity 160ms ease;
+  transition: opacity 180ms ease;
+}
+
+.market-board:hover .market-board-sheen,
+.market-board:focus-within .market-board-sheen {
+  opacity: 0.42;
 }
 
 .market-header {
@@ -910,6 +961,21 @@ button, input { font: inherit; }
   align-items: center;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+.market-row-button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.market-row-button:hover {
+  background: color-mix(in srgb, var(--bg-surface) 10%, transparent);
 }
 
 .market-row:last-child {
@@ -1011,6 +1077,7 @@ button, input { font: inherit; }
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  width: 100%;
 }
 
 .market-news-card {
@@ -1094,9 +1161,144 @@ button, input { font: inherit; }
   font-size: 11px;
 }
 
+.market-home-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 312px;
+  gap: 14px;
+  align-items: start;
+}
+
+.market-timeline-card {
+  padding: 18px 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--bg-toggle-active) 42%, var(--bg-surface));
+  box-shadow: 0 4px 24px var(--shadow-soft);
+  min-height: 0;
+}
+
+.market-timeline-copy {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.market-timeline-day {
+  margin-top: 18px;
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 16px;
+}
+
+.market-timeline-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 640px;
+  overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.market-timeline-list::-webkit-scrollbar {
+  display: none;
+}
+
+.market-timeline-empty {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 8px 0;
+}
+
+.market-timeline-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+  padding: 4px 0 12px;
+}
+
+.market-timeline-rail {
+  position: relative;
+}
+
+.market-timeline-rail::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: -14px;
+  width: 1px;
+  background: var(--border-warm);
+}
+
+.market-timeline-item:last-child .market-timeline-rail::before {
+  bottom: 10px;
+}
+
+.market-timeline-dot {
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg-surface) 92%, transparent);
+}
+
+.market-timeline-body {
+  min-width: 0;
+}
+
+.market-timeline-time {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.market-timeline-title {
+  margin-top: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.market-timeline-title-en {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.market-timeline-source {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-warm);
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.market-timeline-source img {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 .right-panel {
-  width: 33.33%;
-  padding: 40px 32px;
+  width: clamp(320px, 28vw, 420px);
+  padding: 24px 20px;
   position: relative;
   height: 100vh;
   overflow: hidden;
@@ -1268,6 +1470,109 @@ button, input { font: inherit; }
   position: relative;
 }
 
+.chat-input-shell {
+  position: relative;
+}
+
+.image-ocr-input {
+  display: none;
+}
+
+.image-ocr-button {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border-warm));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.image-ocr-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.image-ocr-button:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
+}
+
+.chat-input-shell input[type="text"] {
+  padding-right: 56px;
+}
+
+.ocr-float {
+  position: absolute;
+  left: 10px;
+  bottom: calc(100% + 10px);
+  z-index: 5;
+  padding: 7px 10px 7px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--bg-page));
+  box-shadow: 0 10px 24px var(--shadow-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(220px, calc(100% - 18px));
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.3;
+  animation: ocr-float-in 180ms ease;
+}
+
+.ocr-float.loading { border-color: color-mix(in srgb, var(--accent) 20%, var(--border-soft)); }
+.ocr-float.ready { border-color: color-mix(in srgb, #1d8f54 26%, var(--border-soft)); }
+.ocr-float.error { border-color: color-mix(in srgb, #b53333 28%, var(--border-soft)); }
+
+.ocr-float-count {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.ocr-float-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ocr-float-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
 .sprite-shell {
   position: absolute;
   left: 0;
@@ -1334,6 +1639,17 @@ button, input { font: inherit; }
   to { transform: translate3d(16px, -10px, 0) scale(1.04); }
 }
 
+@keyframes ocr-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 input {
   width: 100%;
   padding: 14px 16px;
@@ -1376,6 +1692,7 @@ input:focus {
   .workspace-shell { grid-template-columns: 1fr; height: auto; }
   .right-panel { width: 100%; height: auto; padding: 24px 20px 28px; }
   .workspace-panel { min-height: 720px; }
+  .market-home-layout { grid-template-columns: 1fr; }
   .agents-grid,
   .agent-topline,
   .agent-section-grid,
@@ -1396,6 +1713,7 @@ input:focus {
   .launch-form-grid { grid-template-columns: 1fr; }
   .settings-card { padding: 20px; }
   .settings-title { font-size: 30px; }
+  .market-home-layout { grid-template-columns: 1fr; }
   .market-news-grid { grid-template-columns: 1fr; }
   .market-header,
   .market-row {

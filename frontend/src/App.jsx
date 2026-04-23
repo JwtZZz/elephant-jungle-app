@@ -21,7 +21,7 @@ export default function App() {
       <div className="main">
         <div className="workspace-shell">
           <Sidebar activeView={activeView} onSelect={setActiveView} language={language} />
-          <WorkspacePanel activeView={activeView} marketRows={marketRows} briefs={briefs} language={language} setLanguage={setLanguage} />
+          <WorkspacePanel activeView={activeView} apiBase={apiBase} marketRows={marketRows} briefs={briefs} language={language} setLanguage={setLanguage} />
         </div>
       </div>
       <ThemeToggle theme={theme} setTheme={setTheme} language={language} />

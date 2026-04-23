@@ -132,6 +132,90 @@ def _chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
     raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
 
 
+def _extract_message_text(message: dict) -> str:
+    content = message.get("content", "")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            for key in ("text", "content"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    text_parts.append(value.strip())
+        if text_parts:
+            return "\n".join(text_parts).strip()
+    reasoning = message.get("reasoning_content", "")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning.strip()
+    return ""
+
+
+def _parse_ocr_payload_text(payload: dict) -> str:
+    choices = payload.get("choices", [])
+    if not choices:
+        return ""
+    message = choices[0].get("message", {})
+    return _extract_message_text(message)
+
+
+def ocr_image_data_url(image_data_url: str, prompt: str | None = None) -> str:
+    api_key = _must_env("DASHSCOPE_API_KEY")
+    configured_model = os.getenv("ALI_OCR_MODEL", "").strip()
+    fallback_models = os.getenv("ALI_OCR_FALLBACK_MODELS", "qwen-vl-ocr,qwen-vl-plus").strip()
+    url = os.getenv(
+        "ALI_VISION_URL",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    )
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    models: list[str] = []
+    primary_model = configured_model or "qwen-vl-ocr-latest"
+    for name in [primary_model, *[item.strip() for item in fallback_models.split(",") if item.strip()]]:
+        if name and name not in models:
+            models.append(name)
+
+    instructions = [item for item in [
+        prompt.strip() if isinstance(prompt, str) and prompt.strip() else "",
+        "Extract all visible text from this image. Return plain text only. Preserve line breaks where useful.",
+        "Read the image carefully and transcribe every visible word, number, symbol, and punctuation mark. Return plain text only. If text is faint, small, rotated, or partially obscured, still provide the best-effort transcription.",
+        "This is an OCR task. Output only the text seen in the image, line by line. Do not explain. Do not summarize. If you can read even part of the text, return that partial transcription.",
+    ] if item]
+
+    last_payload: dict | None = None
+    with httpx.Client(timeout=120) as client:
+        for model in models:
+            for instruction in instructions:
+                data = {
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": image_data_url}},
+                                {"type": "text", "text": instruction},
+                            ],
+                        }
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 800,
+                    "stream": False,
+                }
+                resp = client.post(url, headers=headers, json=data)
+                resp.raise_for_status()
+                payload = resp.json()
+                last_payload = payload
+                text = _parse_ocr_payload_text(payload)
+                if text:
+                    return text
+
+    if last_payload is not None:
+        raise RuntimeError("OCR did not return readable text.")
+    raise RuntimeError("OCR request failed.")
+
+
 def generate_answer(query: str, contexts: list[str]) -> str:
     context_text = "\n\n".join([f"[{i + 1}] {c}" for i, c in enumerate(contexts)])
     system_prompt = (
@@ -162,4 +246,27 @@ def generate_general_answer(query: str) -> str:
             {"role": "user", "content": query},
         ],
         temperature=0.5,
+    )
+
+
+def translate_text(text: str, target_language: str = "zh") -> str:
+    content = (text or "").strip()
+    if not content:
+        return ""
+    if target_language.lower().startswith("zh"):
+        system_prompt = (
+            "Translate the user's text into concise, natural Simplified Chinese. "
+            "Return only the translated text with no explanations."
+        )
+    else:
+        system_prompt = (
+            f"Translate the user's text into {target_language}. "
+            "Return only the translated text with no explanations."
+        )
+    return _chat_completion(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content},
+        ],
+        temperature=0.1,
     )

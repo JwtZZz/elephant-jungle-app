@@ -1,18 +1,21 @@
 from pathlib import Path
+import os
 import time
 from html import unescape
 import re
 import xml.etree.ElementTree as ET
+from urllib.parse import quote_plus
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi import Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from rag import DEFAULT_TOP_K, chat, ingest_document, search
 from store import init_db, sync_chroma_index
-from providers import validate_provider_env
+from providers import ocr_image_data_url, translate_text, validate_provider_env
 
 
 app = FastAPI(title="Minimal RAG Backend", version="0.1.0")
@@ -26,6 +29,9 @@ market_cache: dict[str, object] = {
 }
 BRIEFS_CACHE_TTL_SECONDS = 5 * 60 * 60
 briefs_cache: dict[str, object] = {"timestamp": 0.0, "payload": {}}
+TIMELINE_CACHE_TTL_SECONDS = 15 * 60
+timeline_cache: dict[str, dict] = {}
+title_translation_cache: dict[str, str] = {}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -58,6 +64,12 @@ class SearchRequest(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     top_k: int = Field(default=DEFAULT_TOP_K, ge=1, le=20)
+
+
+class OcrImageRequest(BaseModel):
+    image_data_url: str
+    filename: str | None = None
+    prompt: str | None = None
 
 
 def format_market_cap(value: int | float | None) -> str:
@@ -267,6 +279,72 @@ def fetch_market_briefs() -> dict:
     return payload
 
 
+def build_timeline_feed_url(symbol: str, name: str) -> str:
+    terms = [term for term in [name.strip(), symbol.strip(), "crypto"] if term]
+    query = " OR ".join(f'"{term}"' if " " in term else term for term in terms)
+    return (
+        "https://news.google.com/rss/search?"
+        f"q={quote_plus(query + ' when:1d')}&hl=en-US&gl=US&ceid=US:en"
+    )
+
+
+def translate_title_cached(title: str, language: str) -> str:
+    clean_title = (title or "").strip()
+    if not clean_title:
+        return ""
+    if language != "zh":
+        return clean_title
+    if re.search(r"[\u4e00-\u9fff]", clean_title):
+        return clean_title
+    cached = title_translation_cache.get(clean_title)
+    if cached:
+        return cached
+    try:
+        translated = translate_text(clean_title, target_language="zh").strip()
+    except Exception:
+        translated = clean_title
+    title_translation_cache[clean_title] = translated or clean_title
+    return title_translation_cache[clean_title]
+
+
+def fetch_market_timeline(symbol: str, name: str, language: str = "en") -> list[dict]:
+    normalized_symbol = (symbol or "").strip().upper()
+    normalized_name = (name or "").strip()
+    normalized_language = (language or "en").strip().lower()
+    cache_key = f"{normalized_symbol}:{normalized_name}:{normalized_language}"
+    now = time.time()
+    cached = timeline_cache.get(cache_key)
+    if cached and (now - cached.get("timestamp", 0.0)) < TIMELINE_CACHE_TTL_SECONDS:
+        return list(cached.get("items", []))
+
+    url = build_timeline_feed_url(normalized_symbol, normalized_name or normalized_symbol)
+    items: list[dict] = []
+    try:
+        with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            for item in parse_rss_items(response.text, limit=8):
+                original_title = item.get("title", "").strip()
+                translated_title = translate_title_cached(original_title, normalized_language)
+                items.append(
+                    {
+                        "title": translated_title or original_title,
+                        "original_title": original_title if translated_title and translated_title != original_title else "",
+                        "url": item.get("url", ""),
+                        "published_at": item.get("published_at", ""),
+                        "source": item.get("source", ""),
+                        "source_icon": "",
+                    }
+                )
+    except Exception:
+        if cached:
+            return list(cached.get("items", []))
+        return []
+
+    timeline_cache[cache_key] = {"timestamp": now, "items": items}
+    return items
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -317,6 +395,26 @@ def chat_route(req: ChatRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.post("/ocr/image")
+def ocr_image_route(req: OcrImageRequest) -> dict:
+    try:
+        image_data_url = (req.image_data_url or "").strip()
+        if not image_data_url.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail="Invalid image payload")
+        text = ocr_image_data_url(image_data_url=image_data_url, prompt=req.prompt)
+        return {
+            "text": text,
+            "filename": (req.filename or "").strip(),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        message = str(exc).strip() or "OCR request failed."
+        if "readable text" in message.lower():
+            message = "OCR could not read text from this image."
+        raise HTTPException(status_code=500, detail=message) from exc
+
+
 @app.get("/market/coins")
 def market_coins() -> dict:
     try:
@@ -329,5 +427,18 @@ def market_coins() -> dict:
 def market_briefs() -> dict:
     try:
         return fetch_market_briefs()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/market/timeline")
+def market_timeline(
+    symbol: str = Query(..., min_length=1),
+    name: str = Query("", min_length=0),
+    language: str = Query("en", min_length=2, max_length=8),
+) -> dict:
+    try:
+        items = fetch_market_timeline(symbol=symbol, name=name, language=language)
+        return {"items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
