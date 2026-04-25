@@ -2,48 +2,61 @@ import { useEffect, useMemo, useState } from 'react'
 import MarketBoard from './MarketBoard'
 import NewsPanels from './NewsPanels'
 
+const DETAIL_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
+
 const COPY = {
   en: {
-    back: 'Markets',
-    open: 'Open',
+    back: 'Back',
     timeline: 'Market Feed',
     timelineCopy: 'A warm news rail inspired by the CoinGecko feed, tuned to the asset you selected.',
-    source: 'source',
+    source: 'Source',
     loading: 'Loading market feed...',
     empty: 'No recent feed items were returned for this asset yet.',
     today: 'Today',
-    price: 'Price',
+    last: 'Last',
     change: '24H',
-    range: 'Range',
-    cap: 'Mkt Cap',
-    low: 'Low',
-    high: 'High',
-    quote: 'Quote Board',
-    trend: 'Trend',
+    high: '24H High',
+    low: '24H Low',
+    volBase: '24H Vol',
+    volQuote: '24H Turnover',
+    chart: 'Price Chart',
+    book: 'Order Book',
+    open: 'Open OKX',
+    bids: 'Bids',
+    asks: 'Asks',
+    price: 'Price',
+    amount: 'Size',
+    total: 'Total',
+    loadingMarket: 'Loading market terminal...',
   },
   zh: {
-    back: '市场',
-    open: '打开',
+    back: '返回市场',
     timeline: '市场动态',
     timelineCopy: '右侧这条新闻轨道会跟着首页主币种跑，用更像时间线的方式显示新闻。',
     source: '来源',
     loading: '正在加载相关新闻...',
     empty: '这个币暂时还没有抓到新的相关新闻。',
     today: '今天',
-    price: '价格',
+    last: '最新价',
     change: '24小时',
-    range: '区间',
-    cap: '市值',
-    low: '最低',
-    high: '最高',
-    quote: '行情板',
-    trend: '走势',
+    high: '24H最高',
+    low: '24H最低',
+    volBase: '24H量',
+    volQuote: '24H额',
+    chart: 'K线',
+    book: '盘口',
+    open: '打开 OKX',
+    bids: '买盘',
+    asks: '卖盘',
+    price: '价格',
+    amount: '数量',
+    total: '累计',
+    loadingMarket: '正在加载交易终端...',
   },
 }
 
-function buildMarketUrl(coin) {
-  const slug = (coin.name || coin.symbol || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')
-  return `https://www.coingecko.com/en/coins/${slug}`
+function buildMarketUrl(symbol) {
+  return `https://www.okx.com/trade-spot/${symbol.toLowerCase()}-usdt`
 }
 
 function formatTimelineTime(value, language) {
@@ -56,60 +69,143 @@ function formatTimelineTime(value, language) {
   return `about ${diffHours} hours ago`
 }
 
-function buildSmoothPath(points) {
-  if (!points.length) return ''
-  if (points.length === 1) return `M${points[0].x.toFixed(2)},${points[0].y.toFixed(2)}`
-  let path = `M${points[0].x.toFixed(2)},${points[0].y.toFixed(2)}`
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const current = points[index]
-    const next = points[index + 1]
-    const prev = points[index - 1] || current
-    const after = points[index + 2] || next
-    const cp1x = current.x + (next.x - prev.x) / 6
-    const cp1y = current.y + (next.y - prev.y) / 6
-    const cp2x = next.x - (after.x - current.x) / 6
-    const cp2y = next.y - (after.y - current.y) / 6
-    path += ` C${cp1x.toFixed(2)},${cp1y.toFixed(2)} ${cp2x.toFixed(2)},${cp2y.toFixed(2)} ${next.x.toFixed(2)},${next.y.toFixed(2)}`
-  }
-  return path
+function formatNumber(value, decimals = 2) {
+  if (!Number.isFinite(Number(value))) return '--'
+  return Number(value).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
 }
 
-function DetailSparkline({ points, trendUp }) {
-  const width = 420
-  const height = 124
-  const data = points?.length ? points : [1, 1]
-  const min = Math.min(...data)
-  const max = Math.max(...data)
-  const range = Math.max(1, max - min)
-  const coords = data.map((point, index) => ({
-    x: (index / Math.max(1, data.length - 1)) * width,
-    y: height - (((point - min) / range) * (height - 20) + 10),
-  }))
-  const linePath = buildSmoothPath(coords)
-  const areaPath = `${linePath} L ${width},${height - 6} L 0,${height - 6} Z`
-  const stroke = trendUp ? '#1d8f54' : '#b53333'
-  const gradientId = `detail-fill-${trendUp ? 'up' : 'down'}`
-  const dotId = `detail-dot-${trendUp ? 'up' : 'down'}`
+function formatCompact(value, decimals = 2) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '--'
+  if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(decimals)}B`
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(decimals)}M`
+  if (num >= 1_000) return `${(num / 1_000).toFixed(decimals)}K`
+  return num.toFixed(decimals)
+}
+
+function formatPrice(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '--'
+  if (num >= 1000) return formatNumber(num, 1)
+  if (num >= 1) return formatNumber(num, 4)
+  return formatNumber(num, 6)
+}
+
+function formatPercent(last, open) {
+  const l = Number(last)
+  const o = Number(open)
+  if (!Number.isFinite(l) || !Number.isFinite(o) || o === 0) return 0
+  return ((l - o) / o) * 100
+}
+
+function KlineChart({ candles }) {
+  const width = 920
+  const height = 470
+  const priceAreaHeight = 340
+  const volumeAreaHeight = 82
+  const chartTop = 20
+  const chartLeft = 16
+  const chartRightPad = 76
+  const volumeTop = priceAreaHeight + 28
+  const innerWidth = width - chartLeft - chartRightPad
+  const candleWidth = Math.max(4, innerWidth / Math.max(1, candles.length) * 0.62)
+  const highs = candles.map((item) => item.high)
+  const lows = candles.map((item) => item.low)
+  const vols = candles.map((item) => item.vol)
+  const maxHigh = Math.max(...highs)
+  const minLow = Math.min(...lows)
+  const maxVol = Math.max(...vols, 1)
+  const range = Math.max(maxHigh - minLow, 1)
+
+  const yForPrice = (value) => chartTop + ((maxHigh - value) / range) * (priceAreaHeight - 24)
+  const volumeHeight = (value) => (value / maxVol) * volumeAreaHeight
+  const gridLevels = Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4
+    const value = maxHigh - range * ratio
+    return { value, y: yForPrice(value) }
+  })
 
   return (
-    <svg className="market-detail-sparkline" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={stroke} stopOpacity="0.22" />
-          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path className="market-detail-area" d={areaPath} fill={`url(#${gradientId})`} />
-      <path className="market-detail-path-glow" d={linePath} fill="none" stroke={stroke} strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
-      <path className="market-detail-path" d={linePath} fill="none" stroke={stroke} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" pathLength="100" />
-      <circle className="market-detail-dot" id={dotId} r="4.5" fill={stroke}>
-        <animateMotion dur="5.6s" repeatCount="indefinite" rotate="auto">
-          <mpath href={`#${dotId}-path`} />
-        </animateMotion>
-      </circle>
-      <path id={`${dotId}-path`} d={linePath} fill="none" stroke="transparent" strokeWidth="0" />
+    <svg className="market-kline-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      {gridLevels.map((level) => (
+        <g key={level.y}>
+          <line className="market-kline-grid" x1={chartLeft} y1={level.y} x2={width - chartRightPad + 8} y2={level.y} />
+          <text className="market-kline-axis-label" x={width - chartRightPad + 16} y={level.y + 4}>
+            {formatPrice(level.value)}
+          </text>
+        </g>
+      ))}
+      <line className="market-kline-grid volume-divider" x1={chartLeft} y1={volumeTop - 12} x2={width - chartRightPad + 8} y2={volumeTop - 12} />
+      {candles.map((candle, index) => {
+        const x = chartLeft + (index + 0.5) * (innerWidth / candles.length)
+        const openY = yForPrice(candle.open)
+        const closeY = yForPrice(candle.close)
+        const highY = yForPrice(candle.high)
+        const lowY = yForPrice(candle.low)
+        const bodyTop = Math.min(openY, closeY)
+        const bodyHeight = Math.max(Math.abs(closeY - openY), 2)
+        const up = candle.close >= candle.open
+        const color = up ? '#1d8f54' : '#b53333'
+        const barHeight = volumeHeight(candle.vol)
+        return (
+          <g key={candle.ts}>
+            <line className="market-kline-wick" x1={x} y1={highY} x2={x} y2={lowY} stroke={color} />
+            <rect className="market-kline-body" x={x - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyHeight} fill={color} rx="1.6" />
+            <rect className="market-kline-volume" x={x - candleWidth / 2} y={volumeTop + volumeAreaHeight - barHeight} width={candleWidth} height={barHeight} fill={color} opacity="0.42" rx="1.2" />
+          </g>
+        )
+      })}
     </svg>
   )
+}
+
+function OrderRows({ rows, tone }) {
+  let running = 0
+  const maxTotal = rows.reduce((sum, row) => sum + Number(row.size || 0), 0) || 1
+  return rows.map((row) => {
+    running += Number(row.size || 0)
+    const width = `${Math.max(8, (running / maxTotal) * 100)}%`
+    return (
+      <div className={`market-book-row ${tone}`} key={`${tone}-${row.price}-${row.size}`}>
+        <span className="market-book-depth" style={{ width }} aria-hidden="true" />
+        <span className="market-book-price">{formatPrice(row.price)}</span>
+        <span className="market-book-size">{formatCompact(row.size, 4)}</span>
+        <span className="market-book-total">{formatCompact(running, 4)}</span>
+      </div>
+    )
+  })
+}
+
+function getTimelineCacheKey(symbol, language) {
+  return `market-timeline:${String(symbol || '').toUpperCase()}:${language || 'zh'}`
+}
+
+function readTimelineCache(symbol, language) {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(getTimelineCacheKey(symbol, language))
+    if (!raw) return []
+    const payload = JSON.parse(raw)
+    const timestamp = Number(payload?.timestamp || 0)
+    const items = Array.isArray(payload?.items) ? payload.items : []
+    if (!timestamp || !items.length) return []
+    if ((Date.now() - timestamp) > 15 * 60 * 1000) return []
+    return items
+  } catch {
+    return []
+  }
+}
+
+function writeTimelineCache(symbol, language, items) {
+  if (typeof window === 'undefined' || !Array.isArray(items) || !items.length) return
+  try {
+    window.localStorage.setItem(
+      getTimelineCacheKey(symbol, language),
+      JSON.stringify({ timestamp: Date.now(), items }),
+    )
+  } catch {
+    // ignore cache write failures
+  }
 }
 
 function TimelinePanel({ apiBase, coin, copy, language }) {
@@ -119,17 +215,30 @@ function TimelinePanel({ apiBase, coin, copy, language }) {
   useEffect(() => {
     if (!coin) return
     let ignore = false
-    const loadTimeline = async () => {
+    const cachedItems = readTimelineCache(coin.symbol, 'zh')
+
+    if (cachedItems.length) {
+      setItems(cachedItems)
+      setLoading(false)
+    } else {
+      setItems([])
       setLoading(true)
+    }
+
+    const loadTimeline = async () => {
       try {
         const params = new URLSearchParams({ symbol: coin.symbol, name: coin.name, language: 'zh' })
         const response = await fetch(`${apiBase}/market/timeline?${params.toString()}`)
         if (!response.ok) throw new Error(`timeline request failed (${response.status})`)
         const payload = await response.json()
-        if (!ignore) setItems(Array.isArray(payload.items) ? payload.items : [])
+        const nextItems = Array.isArray(payload.items) ? payload.items : []
+        if (!ignore) {
+          setItems(nextItems)
+          writeTimelineCache(coin.symbol, 'zh', nextItems)
+        }
       } catch (error) {
         console.error('Timeline fallback', error)
-        if (!ignore) setItems([])
+        if (!ignore && !cachedItems.length) setItems([])
       } finally {
         if (!ignore) setLoading(false)
       }
@@ -169,57 +278,158 @@ function TimelinePanel({ apiBase, coin, copy, language }) {
   )
 }
 
-export default function MarketsView({ apiBase, marketRows, briefs, language }) {
-  const copy = COPY[language] || COPY.en
-  const [selectedSymbol, setSelectedSymbol] = useState(null)
-  const homeTimelineCoin = marketRows[0] || null
+function TradingTerminal({ apiBase, coin, interval, onIntervalChange, onBack, copy }) {
+  const [payload, setPayload] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  const selectedCoin = useMemo(() => marketRows.find((coin) => coin.symbol === selectedSymbol) || null, [marketRows, selectedSymbol])
+  useEffect(() => {
+    if (!coin) return
+    let ignore = false
 
-  if (selectedCoin) {
-    const trendUp = Number(selectedCoin.change || 0) >= 0
-    return (
-      <div className="workspace-view active market-detail-view">
-        <section className="market-detail-shell market-detail-shell-single">
-          <div className="market-detail-main market-terminal-shell">
-            <div className="market-terminal-topbar">
-              <button className="market-detail-back" type="button" onClick={() => setSelectedSymbol(null)}>{copy.back}</button>
-              <a className="market-focus-link" href={buildMarketUrl(selectedCoin)} target="_blank" rel="noreferrer">{copy.open}</a>
+    const load = async () => {
+      try {
+        const params = new URLSearchParams({
+          symbol: coin.symbol,
+          interval,
+          candles: '96',
+          depth: '12',
+        })
+        const response = await fetch(`${apiBase}/market/okx-detail?${params.toString()}`)
+        if (!response.ok) throw new Error(`okx detail request failed (${response.status})`)
+        const nextPayload = await response.json()
+        if (!ignore) {
+          setPayload(nextPayload)
+          setLoading(false)
+        }
+      } catch (error) {
+        console.error('OKX detail fallback', error)
+        if (!ignore) setLoading(false)
+      }
+    }
+
+    setLoading(true)
+    load()
+    const timer = window.setInterval(load, 5000)
+    return () => {
+      ignore = true
+      window.clearInterval(timer)
+    }
+  }, [apiBase, coin?.symbol, interval])
+
+  const ticker = payload?.ticker
+  const candles = payload?.candles || []
+  const asks = (payload?.orderbook?.asks || []).slice().reverse()
+  const bids = payload?.orderbook?.bids || []
+  const last = Number(ticker?.last || 0)
+  const change = formatPercent(ticker?.last, ticker?.open24h)
+  const up = change >= 0
+
+  return (
+    <div className="workspace-view active market-detail-view">
+      <section className="market-terminal-shell">
+        <div className="market-terminal-topbar">
+          <button className="market-detail-back" type="button" onClick={onBack}>{copy.back}</button>
+          <a className="market-focus-link" href={buildMarketUrl(coin.symbol)} target="_blank" rel="noreferrer">{copy.open}</a>
+        </div>
+
+        <div className="market-terminal-summary">
+          <div className="market-terminal-pair">
+            <div className="market-terminal-badge">{coin.symbol}</div>
+            <div>
+              <div className="market-terminal-symbol">{coin.symbol}/USDT</div>
+              <div className="market-terminal-name">{coin.name}</div>
             </div>
-            <section className="market-terminal-card">
-              <div className="market-terminal-head">
-                <div className="market-terminal-ident">
-                  <div className="market-terminal-symbol">{selectedCoin.symbol}</div>
-                  <div className="market-terminal-name">{selectedCoin.name}</div>
-                </div>
-                <div className="market-terminal-priceblock">
-                  <div className="market-terminal-price">{selectedCoin.price}</div>
-                  <div className={`market-terminal-change ${trendUp ? 'up' : 'down'}`}>
-                    {Number(selectedCoin.change || 0) > 0 ? '+' : ''}{Number(selectedCoin.change || 0).toFixed(2)}%
-                  </div>
-                </div>
+          </div>
+          <div className="market-terminal-lastblock">
+            <div className={`market-terminal-last ${up ? 'up' : 'down'}`}>{formatPrice(last)}</div>
+            <div className={`market-terminal-change ${up ? 'up' : 'down'}`}>{up ? '+' : ''}{change.toFixed(2)}%</div>
+          </div>
+          <div className="market-terminal-stats">
+            <div><span>{copy.high}</span><strong>{formatPrice(ticker?.high24h)}</strong></div>
+            <div><span>{copy.low}</span><strong>{formatPrice(ticker?.low24h)}</strong></div>
+            <div><span>{copy.volBase}</span><strong>{formatCompact(ticker?.vol24h, 2)}</strong></div>
+            <div><span>{copy.volQuote}</span><strong>{formatCompact(ticker?.volCcy24h, 2)}</strong></div>
+          </div>
+        </div>
+
+        <div className="market-terminal-toolbar">
+          {DETAIL_INTERVALS.map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={`market-interval-pill ${interval === item ? 'active' : ''}`}
+              onClick={() => onIntervalChange(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+
+        {loading ? <div className="market-terminal-loading">{copy.loadingMarket}</div> : null}
+
+        {!loading ? (
+          <div className="market-terminal-grid">
+            <section className="market-terminal-panel market-terminal-chart-panel">
+              <div className="market-terminal-panel-head">
+                <div className="market-news-kicker">{copy.chart}</div>
+                <div className="market-terminal-panel-meta">{coin.symbol}/USDT ? OKX ? {interval}</div>
               </div>
-              <div className="market-terminal-grid">
-                <div className="market-terminal-panel market-terminal-quote">
-                  <div className="market-news-kicker">{copy.quote}</div>
-                  <div className="market-terminal-table">
-                    <div><span>{copy.price}</span><strong>{selectedCoin.price}</strong></div>
-                    <div><span>{copy.change}</span><strong className={trendUp ? 'up' : 'down'}>{Number(selectedCoin.change || 0) > 0 ? '+' : ''}{Number(selectedCoin.change || 0).toFixed(2)}%</strong></div>
-                    <div><span>{copy.low}</span><strong>{selectedCoin.low}</strong></div>
-                    <div><span>{copy.high}</span><strong>{selectedCoin.high}</strong></div>
-                    <div><span>{copy.range}</span><strong>{selectedCoin.low} - {selectedCoin.high}</strong></div>
-                    <div><span>{copy.cap}</span><strong>{selectedCoin.cap}</strong></div>
-                  </div>
-                </div>
-                <div className="market-terminal-panel market-terminal-trend">
-                  <div className="market-news-kicker">{copy.trend}</div>
-                  <DetailSparkline points={selectedCoin.spark} trendUp={trendUp} />
-                </div>
+              <div className="market-terminal-chart-wrap">
+                {candles.length ? <KlineChart candles={candles} /> : <div className="market-terminal-empty">No chart data.</div>}
+              </div>
+            </section>
+
+            <section className="market-terminal-panel market-terminal-book-panel">
+              <div className="market-terminal-panel-head">
+                <div className="market-news-kicker">{copy.book}</div>
+                <div className={`market-terminal-book-last ${up ? 'up' : 'down'}`}>{formatPrice(last)}</div>
+              </div>
+              <div className="market-book-head">
+                <span>{copy.price}</span>
+                <span>{copy.amount}</span>
+                <span>{copy.total}</span>
+              </div>
+              <div className="market-book-section asks">
+                <div className="market-book-side">{copy.asks}</div>
+                <OrderRows rows={asks} tone="asks" />
+              </div>
+              <div className={`market-book-mid ${up ? 'up' : 'down'}`}>
+                <strong>{formatPrice(last)}</strong>
+                <span>{formatPrice(ticker?.bidPx)} / {formatPrice(ticker?.askPx)}</span>
+              </div>
+              <div className="market-book-section bids">
+                <div className="market-book-side">{copy.bids}</div>
+                <OrderRows rows={bids} tone="bids" />
               </div>
             </section>
           </div>
-        </section>
-      </div>
+        ) : null}
+      </section>
+    </div>
+  )
+}
+
+export default function MarketsView({ apiBase, marketRows, briefs, language }) {
+  const copy = COPY[language] || COPY.en
+  const [selectedCoin, setSelectedCoin] = useState(null)
+  const [selectedInterval, setSelectedInterval] = useState('15m')
+  const homeTimelineCoin = marketRows[0] || null
+
+  const activeCoin = useMemo(() => {
+    if (!selectedCoin) return null
+    return marketRows.find((item) => item.symbol === selectedCoin.symbol) || selectedCoin
+  }, [marketRows, selectedCoin])
+
+  if (activeCoin) {
+    return (
+      <TradingTerminal
+        apiBase={apiBase}
+        coin={activeCoin}
+        interval={selectedInterval}
+        onIntervalChange={setSelectedInterval}
+        onBack={() => setSelectedCoin(null)}
+        copy={copy}
+      />
     )
   }
 
@@ -228,7 +438,7 @@ export default function MarketsView({ apiBase, marketRows, briefs, language }) {
       <div className="market-home-layout">
         <div className="market-shell market-shell-atmosphere">
           <div className="market-pixel-haze" aria-hidden="true" />
-          <MarketBoard rows={marketRows} language={language} onSelectCoin={(coin) => setSelectedSymbol(coin.symbol)} />
+          <MarketBoard rows={marketRows} language={language} onSelectCoin={(coin) => setSelectedCoin(coin)} />
           <NewsPanels briefs={briefs} language={language} />
         </div>
         {homeTimelineCoin ? <TimelinePanel apiBase={apiBase} coin={homeTimelineCoin} copy={copy} language={language} /> : null}

@@ -5,6 +5,9 @@ const MARKET_REFRESH_MS = 3000
 const BRIEFS_REFRESH_MS = 5 * 60 * 60 * 1000
 
 function getApiBase() {
+  if (window.location.hostname.endsWith('trycloudflare.com')) {
+    return window.location.origin
+  }
   return `${window.location.protocol}//${window.location.hostname || '127.0.0.1'}:8000`
 }
 

@@ -128,6 +128,7 @@ export default function ChatPanel({ apiBase, language }) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [ocrState, setOcrState] = useState(null)
   const [selectedImageFile, setSelectedImageFile] = useState(null)
+  const [selectedImagePreview, setSelectedImagePreview] = useState('')
   const chatBoxRef = useRef(null)
   const chatSpriteTrackRef = useRef(null)
   const chatSpriteShellRef = useRef(null)
@@ -156,7 +157,8 @@ export default function ChatPanel({ apiBase, language }) {
     })
   }
 
-  const askBackend = async (query, controller) => {
+  const askBackend = async (query, controller, options = {}) => {
+    const { useRag = true } = options
     let didTimeout = false
     const timeoutId = window.setTimeout(() => {
       didTimeout = true
@@ -167,7 +169,7 @@ export default function ChatPanel({ apiBase, language }) {
       const response = await fetch(`${apiBase}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, top_k: 5 }),
+        body: JSON.stringify({ query, top_k: 5, use_rag: useRag }),
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -195,16 +197,19 @@ export default function ChatPanel({ apiBase, language }) {
     }
   }
 
+  const readFileAsDataUrl = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error(copy.requestFailed))
+      reader.readAsDataURL(file)
+    })
+
   const runImageOcr = async (file) => {
     if (!file) return ''
     boost()
 
-    const imageDataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = () => reject(new Error(copy.requestFailed))
-      reader.readAsDataURL(file)
-    })
+    const imageDataUrl = await readFileAsDataUrl(file)
 
     const response = await fetch(`${apiBase}/ocr/image`, {
       method: 'POST',
@@ -345,8 +350,15 @@ export default function ChatPanel({ apiBase, language }) {
     setIsStreaming(true)
     boost()
 
-    const userText = query.trim() || (selectedImageFile ? `[Image] ${selectedImageFile.name}` : query)
-    const userMessage = retryMessageId ? null : { id: `user-${Date.now()}`, role: 'user', text: userText }
+    const userText = query.trim()
+    const userMessage = retryMessageId
+      ? null
+      : {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          text: userText,
+          imageUrl: selectedImagePreview || '',
+        }
     const botId = retryMessageId || `bot-${Date.now()}`
     const controller = new AbortController()
     const runId = activeRunIdRef.current
@@ -372,21 +384,24 @@ export default function ChatPanel({ apiBase, language }) {
 
     try {
       let backendQuery = query
+      let useRag = true
       if (selectedImageFile) {
         setOcrState({ name: selectedImageFile.name, status: 'loading' })
         const extractedText = await runImageOcr(selectedImageFile)
         setOcrState({ name: selectedImageFile.name, status: 'ready' })
+        useRag = false
         backendQuery = query.trim()
           ? `${query.trim()}\n\n[Image OCR]\n${extractedText}`
           : `[Image OCR]\n${extractedText}`
       }
 
-      const answer = await askBackend(backendQuery, controller)
+      const answer = await askBackend(backendQuery, controller, { useRag })
       if (runId !== activeRunIdRef.current) return
       stopThinking()
       stopThinkingRef.current = null
       await streamAssistantText(botId, answer, backendQuery, runId)
       setSelectedImageFile(null)
+      setSelectedImagePreview('')
       setOcrState(null)
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -397,6 +412,7 @@ export default function ChatPanel({ apiBase, language }) {
       stopThinkingRef.current = null
       if (selectedImageFile) {
         setSelectedImageFile(null)
+        setSelectedImagePreview('')
         setOcrState(null)
       }
       await streamAssistantText(botId, `${copy.backendError}: ${error.message}`, query, runId)
@@ -427,7 +443,12 @@ export default function ChatPanel({ apiBase, language }) {
             .filter((message) => !(message.hiddenWhilePending && !message.text.trim()))
             .map((message) => (
               <div className={`msg ${message.role} ${message.role === 'bot' ? 'assistant' : ''}`} key={message.id}>
-                <div className={`msg-content ${message.thinking ? 'thinking-inline' : ''}`}>{message.text}</div>
+                <div className={`msg-content ${message.thinking ? 'thinking-inline' : ''} ${message.imageUrl ? 'has-image' : ''}`}>
+                  {message.imageUrl ? (
+                    <img className="chat-image-preview" src={message.imageUrl} alt="uploaded content" />
+                  ) : null}
+                  {message.text ? <div>{message.text}</div> : null}
+                </div>
                 {message.role === 'bot' && !message.thinking && !message.hideActions && message.text.trim() ? (
                   <MessageActions
                     copyLabel={copy.copy}
@@ -467,8 +488,20 @@ export default function ChatPanel({ apiBase, language }) {
                 const file = event.target.files?.[0]
                 if (!file) return
                 setSelectedImageFile(file)
-                setOcrState({ name: file.name, status: 'attached' })
-                event.target.value = ''
+                readFileAsDataUrl(file)
+                  .then((dataUrl) => {
+                    setSelectedImagePreview(dataUrl)
+                    setOcrState({ name: file.name, status: 'attached' })
+                  })
+                  .catch((error) => {
+                    console.error('Preview failed', error)
+                    setSelectedImageFile(null)
+                    setSelectedImagePreview('')
+                    setOcrState({ name: file.name, status: 'error' })
+                  })
+                  .finally(() => {
+                    event.target.value = ''
+                  })
               }}
             />
             <input
@@ -507,6 +540,7 @@ export default function ChatPanel({ apiBase, language }) {
                 onClick={() => {
                   setOcrState(null)
                   setSelectedImageFile(null)
+                  setSelectedImagePreview('')
                 }}
               >
                 x

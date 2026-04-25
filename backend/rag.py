@@ -283,7 +283,11 @@ def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
     return search_chunks(query_embedding=query_vector, top_k=top_k)
 
 
-def chat(query: str, top_k: int = DEFAULT_TOP_K) -> dict:
+def chat(query: str, top_k: int = DEFAULT_TOP_K, use_rag: bool = True) -> dict:
+    if not use_rag:
+        answer = generate_general_answer(query=query)
+        return {"answer": answer, "contexts": [], "sources": [], "mode": "general"}
+
     hits = search(query=query, top_k=top_k)
     contexts = [h["content"] for h in hits]
     top_score = hits[0]["score"] if hits else -1.0

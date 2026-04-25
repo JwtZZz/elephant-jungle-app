@@ -22,34 +22,26 @@ function buildSmoothPath(points) {
 function Sparkline({ points, trendUp }) {
   const width = 144
   const height = 46
-  const min = Math.min(...points)
-  const max = Math.max(...points)
+  const data = points?.length ? points : [1, 1]
+  const min = Math.min(...data)
+  const max = Math.max(...data)
   const range = Math.max(1, max - min)
-  const coords = points.map((point, index) => ({
-    x: (index / Math.max(1, points.length - 1)) * width,
+  const coords = data.map((point, index) => ({
+    x: (index / Math.max(1, data.length - 1)) * width,
     y: height - (((point - min) / range) * (height - 8) + 4),
   }))
-  const linePath = buildSmoothPath(coords)
   const stroke = trendUp ? '#1d8f54' : '#b53333'
-  const dotId = `market-dot-${trendUp ? 'up' : 'down'}-${Math.round(points[0] || 0)}-${points.length}`
 
   return (
     <svg className="market-sparkline" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-      <path className="market-sparkline-glow" d={linePath} fill="none" stroke={stroke} strokeWidth="5.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path className="market-sparkline-line" d={linePath} fill="none" stroke={stroke} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" pathLength="100" />
-      <circle className="market-sparkline-dot" r="2.6" fill={stroke}>
-        <animateMotion dur="4.6s" repeatCount="indefinite" rotate="auto">
-          <mpath href={`#${dotId}`} />
-        </animateMotion>
-      </circle>
-      <path id={dotId} d={linePath} fill="none" stroke="transparent" strokeWidth="0" />
+      <path d={buildSmoothPath(coords)} fill="none" stroke={stroke} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
 
 const HEADERS = {
   en: ['Asset', 'Price', '24h', 'Trend', '24h Range', 'Market Cap'],
-  zh: ['资产', '价格', '24小时', '趋势', '24小时区间', '市值'],
+  zh: ['资产', '价格', '24小时', '走势', '24小时区间', '市值'],
 }
 
 export default function MarketBoard({ rows, language, onSelectCoin }) {
@@ -82,7 +74,6 @@ export default function MarketBoard({ rows, language, onSelectCoin }) {
     const board = boardRef.current
     if (!board) return
     if (frameRef.current) cancelAnimationFrame(frameRef.current)
-
     board.style.setProperty('--tilt-rotate-x', '0deg')
     board.style.setProperty('--tilt-rotate-y', '0deg')
     board.style.setProperty('--tilt-glow-x', '50%')
@@ -99,10 +90,10 @@ export default function MarketBoard({ rows, language, onSelectCoin }) {
       </div>
       <div className="market-rows">
         {rows.map((coin) => {
-          const trendUp = coin.change >= 0
+          const trendUp = Number(coin.change || 0) >= 0
           const fillWidth = trendUp ? 68 : 44
           return (
-            <button className="market-row market-row-button" key={coin.symbol} type="button" onClick={() => onSelectCoin?.(coin)}>
+            <button className="market-row market-row-button" type="button" key={coin.symbol} onClick={() => onSelectCoin?.(coin)}>
               <div className="market-asset">
                 <div className="market-coin-mark">
                   {coin.image ? <img src={coin.image} alt={coin.symbol} /> : coin.symbol.slice(0, 2)}
@@ -114,10 +105,10 @@ export default function MarketBoard({ rows, language, onSelectCoin }) {
               </div>
               <div className="market-price">{coin.price}</div>
               <div className={`market-change ${trendUp ? 'up' : 'down'}`}>
-                {coin.change > 0 ? '+' : ''}
+                {trendUp ? '+' : ''}
                 {Number(coin.change || 0).toFixed(2)}%
               </div>
-              <div><Sparkline points={coin.spark?.length ? coin.spark : [1, 1]} trendUp={trendUp} /></div>
+              <div><Sparkline points={coin.spark} trendUp={trendUp} /></div>
               <div className="market-range">
                 <div className="market-range-track"><span className="market-range-fill" style={{ width: `${fillWidth}%` }} /></div>
                 <div className="market-range-values"><span>{coin.low}</span><span>{coin.high}</span></div>

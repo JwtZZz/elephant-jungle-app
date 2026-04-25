@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import time
+import threading
 from html import unescape
 import re
 import xml.etree.ElementTree as ET
@@ -30,8 +31,17 @@ market_cache: dict[str, object] = {
 BRIEFS_CACHE_TTL_SECONDS = 5 * 60 * 60
 briefs_cache: dict[str, object] = {"timestamp": 0.0, "payload": {}}
 TIMELINE_CACHE_TTL_SECONDS = 15 * 60
+TIMELINE_PREWARM_INTERVAL_SECONDS = 10 * 60
+TIMELINE_PREWARM_ASSETS = [
+    ("BTC", "Bitcoin"),
+    ("ETH", "Ethereum"),
+    ("SOL", "Solana"),
+]
 timeline_cache: dict[str, dict] = {}
 title_translation_cache: dict[str, str] = {}
+timeline_prewarm_started = False
+OKX_DETAIL_TTL_SECONDS = 3
+okx_detail_cache: dict[str, dict] = {}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -64,6 +74,7 @@ class SearchRequest(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     top_k: int = Field(default=DEFAULT_TOP_K, ge=1, le=20)
+    use_rag: bool = True
 
 
 class OcrImageRequest(BaseModel):
@@ -112,6 +123,113 @@ def fetch_okx_tickers() -> dict[str, dict]:
         base_symbol = inst_id.split("-")[0]
         tickers[base_symbol] = item
     return tickers
+
+
+def map_okx_bar(interval: str) -> str:
+    normalized = (interval or "15m").strip().lower()
+    mapping = {
+        "1m": "1m",
+        "3m": "3m",
+        "5m": "5m",
+        "15m": "15m",
+        "30m": "30m",
+        "1h": "1H",
+        "4h": "4H",
+        "1d": "1D",
+    }
+    return mapping.get(normalized, "15m")
+
+
+def parse_okx_number(value: str | None) -> float:
+    try:
+        return float(value or 0.0)
+    except Exception:
+        return 0.0
+
+
+def build_okx_inst_id(symbol: str) -> str:
+    return f"{(symbol or '').strip().upper()}-USDT"
+
+
+def fetch_okx_market_detail(symbol: str, interval: str = "15m", candle_limit: int = 96, depth_limit: int = 12) -> dict:
+    inst_id = build_okx_inst_id(symbol)
+    bar = map_okx_bar(interval)
+    cache_key = f"{inst_id}:{bar}:{candle_limit}:{depth_limit}"
+    now = time.time()
+    cached = okx_detail_cache.get(cache_key)
+    if cached and (now - cached.get("timestamp", 0.0)) < OKX_DETAIL_TTL_SECONDS:
+        return cached["payload"]
+
+    with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+        ticker_resp = client.get("https://www.okx.com/api/v5/market/ticker", params={"instId": inst_id})
+        candles_resp = client.get(
+            "https://www.okx.com/api/v5/market/candles",
+            params={"instId": inst_id, "bar": bar, "limit": str(candle_limit)},
+        )
+        books_resp = client.get(
+            "https://www.okx.com/api/v5/market/books",
+            params={"instId": inst_id, "sz": str(depth_limit)},
+        )
+        ticker_resp.raise_for_status()
+        candles_resp.raise_for_status()
+        books_resp.raise_for_status()
+        ticker_payload = ticker_resp.json()
+        candles_payload = candles_resp.json()
+        books_payload = books_resp.json()
+
+    ticker = (ticker_payload.get("data") or [{}])[0]
+    candles_raw = candles_payload.get("data") or []
+    books = (books_payload.get("data") or [{}])[0]
+
+    candles = []
+    for row in reversed(candles_raw):
+        if len(row) < 9:
+            continue
+        candles.append(
+            {
+                "ts": int(row[0]),
+                "open": parse_okx_number(row[1]),
+                "high": parse_okx_number(row[2]),
+                "low": parse_okx_number(row[3]),
+                "close": parse_okx_number(row[4]),
+                "vol": parse_okx_number(row[5]),
+                "volCcy": parse_okx_number(row[6]),
+                "volCcyQuote": parse_okx_number(row[7]),
+                "confirmed": row[8] == "1",
+            }
+        )
+
+    bids = []
+    for row in books.get("bids") or []:
+        if len(row) < 2:
+            continue
+        bids.append({"price": parse_okx_number(row[0]), "size": parse_okx_number(row[1])})
+
+    asks = []
+    for row in books.get("asks") or []:
+        if len(row) < 2:
+            continue
+        asks.append({"price": parse_okx_number(row[0]), "size": parse_okx_number(row[1])})
+
+    payload = {
+        "instId": inst_id,
+        "bar": bar,
+        "ticker": {
+            "last": parse_okx_number(ticker.get("last")),
+            "open24h": parse_okx_number(ticker.get("open24h")),
+            "high24h": parse_okx_number(ticker.get("high24h")),
+            "low24h": parse_okx_number(ticker.get("low24h")),
+            "vol24h": parse_okx_number(ticker.get("vol24h")),
+            "volCcy24h": parse_okx_number(ticker.get("volCcy24h")),
+            "askPx": parse_okx_number(ticker.get("askPx")),
+            "bidPx": parse_okx_number(ticker.get("bidPx")),
+            "ts": int(ticker.get("ts") or 0),
+        },
+        "candles": candles,
+        "orderbook": {"bids": bids, "asks": asks},
+    }
+    okx_detail_cache[cache_key] = {"timestamp": now, "payload": payload}
+    return payload
 
 
 def serialize_market_coin(coin: dict) -> dict:
@@ -345,11 +463,41 @@ def fetch_market_timeline(symbol: str, name: str, language: str = "en") -> list[
     return items
 
 
+def prewarm_market_timeline_once() -> None:
+    for symbol, name in TIMELINE_PREWARM_ASSETS:
+        try:
+            fetch_market_timeline(symbol=symbol, name=name, language="zh")
+        except Exception as exc:
+            print(f"Timeline prewarm failed for {symbol}: {exc}")
+
+
+def start_timeline_prewarm() -> None:
+    global timeline_prewarm_started
+    if timeline_prewarm_started:
+        return
+    timeline_prewarm_started = True
+
+    def worker() -> None:
+        while True:
+            prewarm_market_timeline_once()
+            time.sleep(TIMELINE_PREWARM_INTERVAL_SECONDS)
+
+    thread = threading.Thread(target=worker, name="timeline-prewarm", daemon=True)
+    thread.start()
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
     sync_chroma_index()
     validate_provider_env()
+    start_timeline_prewarm()
+
+
+@app.get("/market/timeline/prewarm")
+def market_timeline_prewarm() -> dict:
+    prewarm_market_timeline_once()
+    return {"ok": True, "assets": [symbol for symbol, _ in TIMELINE_PREWARM_ASSETS]}
 
 
 @app.get("/health")
@@ -390,7 +538,7 @@ def search_route(req: SearchRequest) -> dict:
 @app.post("/chat")
 def chat_route(req: ChatRequest) -> dict:
     try:
-        return chat(query=req.query, top_k=req.top_k)
+        return chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -427,6 +575,19 @@ def market_coins() -> dict:
 def market_briefs() -> dict:
     try:
         return fetch_market_briefs()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/market/okx-detail")
+def market_okx_detail(
+    symbol: str = Query(..., min_length=1),
+    interval: str = Query("15m", min_length=2, max_length=4),
+    candles: int = Query(96, ge=24, le=240),
+    depth: int = Query(12, ge=5, le=50),
+) -> dict:
+    try:
+        return fetch_okx_market_detail(symbol=symbol, interval=interval, candle_limit=candles, depth_limit=depth)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
