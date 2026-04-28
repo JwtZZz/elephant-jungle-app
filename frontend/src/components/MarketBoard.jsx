@@ -1,3 +1,5 @@
+import { useCallback, useRef } from 'react'
+
 const COPY = {
   en: {
     asset: 'Asset',
@@ -69,8 +71,56 @@ function rangeSpreadLabel(low, high, copy) {
   return `${copy.spread} ${ratio.toFixed(ratio >= 10 ? 1 : 2)}%`
 }
 
+const MAG_MAX_SCALE = 2
+const MAG_MAX_DISTANCE = 140
+
+function resetRowCells(row) {
+  if (!row) return
+  row.querySelectorAll('.mag-cell').forEach((cell) => {
+    cell.style.setProperty('--cell-scale', '1')
+    cell.style.setProperty('--cell-lift', '0px')
+    cell.style.setProperty('--cell-glow', '0')
+  })
+}
+
 export default function MarketBoard({ rows, language, onSelectCoin }) {
   const copy = COPY[language] || COPY.en
+  const rowsContainerRef = useRef(null)
+  const activeRowRef = useRef(null)
+
+  const handleRowsPointerMove = useCallback((event) => {
+    const topEl = document.elementFromPoint(event.clientX, event.clientY)
+    const row = topEl?.closest('.market-row-button')
+
+    if (activeRowRef.current && activeRowRef.current !== row) {
+      resetRowCells(activeRowRef.current)
+      activeRowRef.current = null
+    }
+
+    if (!row) return
+
+    activeRowRef.current = row
+    const rowRect = row.getBoundingClientRect()
+    const mouseX = event.clientX - rowRect.left
+    const cells = row.querySelectorAll('.mag-cell')
+
+    cells.forEach((cell) => {
+      const rect = cell.getBoundingClientRect()
+      const cellCenterX = rect.left - rowRect.left + rect.width / 2
+      const distance = Math.abs(mouseX - cellCenterX)
+      const factor = Math.max(0, 1 - distance / MAG_MAX_DISTANCE)
+      cell.style.setProperty('--cell-scale', (1 + MAG_MAX_SCALE * factor).toFixed(4))
+      cell.style.setProperty('--cell-lift', '0px')
+      cell.style.setProperty('--cell-glow', '0')
+    })
+  }, [])
+
+  const handleRowsPointerLeave = useCallback(() => {
+    if (activeRowRef.current) {
+      resetRowCells(activeRowRef.current)
+      activeRowRef.current = null
+    }
+  }, [])
 
   const handlePointerMove = (event) => {
     const board = event.currentTarget
@@ -106,7 +156,7 @@ export default function MarketBoard({ rows, language, onSelectCoin }) {
         <div>{copy.cap}</div>
       </div>
 
-      <div className="market-rows">
+      <div className="market-rows" ref={rowsContainerRef} onPointerMove={handleRowsPointerMove} onPointerLeave={handleRowsPointerLeave}>
         {rows.map((row) => {
           const isUp = Number(row.change) >= 0
           return (
@@ -116,37 +166,41 @@ export default function MarketBoard({ rows, language, onSelectCoin }) {
               className="market-row market-row-button"
               onClick={() => onSelectCoin(row)}
             >
-              <div className="market-asset">
-                <span className="market-coin-mark">
-                  {row.image ? <img src={row.image} alt={row.symbol} /> : row.symbol?.slice(0, 1)}
-                </span>
-                <span>
-                  <div className="market-symbol">{row.symbol}</div>
-                  <div className="market-name">{row.name}</div>
-                </span>
+              <div className="market-asset mag-cell">
+                <div className="mag-cell-body market-asset-body">
+                  <span className="market-coin-mark">
+                    {row.image ? <img src={row.image} alt={row.symbol} /> : row.symbol?.slice(0, 1)}
+                  </span>
+                  <span>
+                    <div className="market-symbol">{row.symbol}</div>
+                    <div className="market-name">{row.name}</div>
+                  </span>
+                </div>
               </div>
 
-              <div className="market-price">{row.price}</div>
-              <div className={`market-change ${isUp ? 'up' : 'down'}`}>{isUp ? '+' : ''}{Number(row.change).toFixed(2)}%</div>
+              <div className="market-price mag-cell"><div className="mag-cell-body">{row.price}</div></div>
+              <div className={`market-change mag-cell ${isUp ? 'up' : 'down'}`}><div className="mag-cell-body">{isUp ? '+' : ''}{Number(row.change).toFixed(2)}%</div></div>
 
-              <div className="market-trend">
-                <svg className="market-sparkline" viewBox="0 0 100 46" preserveAspectRatio="none" aria-hidden="true">
-                  <path
-                    d={sparkPath(row.spark)}
-                    fill="none"
-                    stroke={isUp ? '#1d8f54' : '#bf3f37'}
-                    strokeWidth="2.3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
+              <div className="market-trend mag-cell">
+                <div className="mag-cell-body">
+                  <svg className="market-sparkline" viewBox="0 0 100 46" preserveAspectRatio="none" aria-hidden="true">
+                    <path
+                      d={sparkPath(row.spark)}
+                      fill="none"
+                      stroke={isUp ? '#1d8f54' : '#bf3f37'}
+                      strokeWidth="2.3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
               </div>
 
-              <div className="market-metric market-price-compact">{compactMoneyLabel(row.low)}</div>
-              <div className="market-metric market-price-compact">{compactMoneyLabel(row.high)}</div>
-              <div className="market-metric">{rangeDeltaLabel(row.low, row.high)}</div>
-              <div className="market-metric">{rangeSpreadLabel(row.low, row.high, copy).replace(`${copy.spread} `, '')}</div>
-              <div className="market-cap">{row.cap}</div>
+              <div className="market-metric market-price-compact mag-cell"><div className="mag-cell-body">{compactMoneyLabel(row.low)}</div></div>
+              <div className="market-metric market-price-compact mag-cell"><div className="mag-cell-body">{compactMoneyLabel(row.high)}</div></div>
+              <div className="market-metric mag-cell"><div className="mag-cell-body">{rangeDeltaLabel(row.low, row.high)}</div></div>
+              <div className="market-metric mag-cell"><div className="mag-cell-body">{rangeSpreadLabel(row.low, row.high, copy).replace(`${copy.spread} `, '')}</div></div>
+              <div className="market-cap mag-cell"><div className="mag-cell-body">{row.cap}</div></div>
             </button>
           )
         })}

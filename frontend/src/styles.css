@@ -1007,6 +1007,27 @@ button, input { font: inherit; }
   background: color-mix(in srgb, var(--bg-surface) 10%, transparent);
 }
 
+.mag-cell {
+  transform: translateY(var(--cell-lift, 0px)) scale(var(--cell-scale, 1));
+  transform-origin: center center;
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1), color 180ms ease-out;
+  will-change: transform;
+  position: relative;
+  z-index: 1;
+  overflow: visible;
+}
+
+.mag-cell-body {
+  display: inline-block;
+  transform-origin: center center;
+}
+
+.market-asset-body {
+  display: flex;
+  align-items: center;
+  gap: clamp(8px, 0.75vw, 12px);
+}
+
 .market-row:last-child {
   border-bottom: none;
 }

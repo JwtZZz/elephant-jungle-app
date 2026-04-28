@@ -35,10 +35,7 @@ export default function Sidebar({ activeView, onSelect, language }) {
         </div>
       </div>
       <div className="brand-mark">
-        <div>
-          <div className="brand-title">Elephant Jungle</div>
-        </div>
-        <span className="status-dot" aria-hidden="true" />
+        <div className="brand-title">Elephant Jungle</div>
       </div>
 
       <div className="nav-list">
