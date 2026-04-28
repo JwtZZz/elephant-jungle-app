@@ -62,3 +62,21 @@
 2026-04-26T06:18:00Z INF Registered tunnel connection connIndex=0 connection=8f4c9165-0342-4c0a-9871-00d41c77cd55 event=0 ip=198.41.200.233 location=hkg13 protocol=http2
 2026-04-26T06:27:33Z ERR Failed to refresh DNS local resolver error="lookup region1.v2.argotunnel.com: i/o timeout"
 2026-04-26T06:32:38Z ERR Failed to refresh DNS local resolver error="lookup region1.v2.argotunnel.com: i/o timeout"
+2026-04-27T14:42:45Z INF Lost connection with the edge connIndex=0
+2026-04-27T14:42:45Z ERR failed to serve incoming request error="Error shutting down control stream: stream error: stream ID 1; CANCEL"
+2026-04-27T14:42:45Z ERR Serve tunnel error error="connection with edge closed" connIndex=0 event=0 ip=198.41.200.233
+2026-04-27T14:42:45Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.233
+2026-04-27T14:42:46Z ERR Connection terminated error="connection with edge closed" connIndex=0
+2026-04-27T14:42:47Z INF Registered tunnel connection connIndex=0 connection=abf2c057-a0c5-4776-8639-df07dad66e30 event=0 ip=198.41.200.233 location=hkg12 protocol=http2
+2026-04-27T14:48:04Z ERR failed to serve incoming request error="Error shutting down control stream: context canceled"
+2026-04-27T14:48:04Z ERR Serve tunnel error error="Error shutting down control stream: context canceled" connIndex=0 event=0 ip=198.41.200.233
+2026-04-27T14:48:04Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.233
+2026-04-27T14:48:06Z ERR Connection terminated error="Error shutting down control stream: context canceled" connIndex=0
+2026-04-27T14:48:22Z INF Registered tunnel connection connIndex=0 connection=edab4c9a-a9d0-4fac-98e2-4e297346535f event=0 ip=198.41.200.233 location=hkg13 protocol=http2
+2026-04-28T07:32:47Z ERR Failed to refresh DNS local resolver error="lookup region1.v2.argotunnel.com: i/o timeout"
+2026-04-28T07:37:19Z INF Lost connection with the edge connIndex=0
+2026-04-28T07:37:19Z WRN Serve tunnel error error="connection with edge closed" connIndex=0 event=0 ip=198.41.200.233
+2026-04-28T07:37:19Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.233
+2026-04-28T07:37:19Z ERR failed to serve incoming request error="Error shutting down control stream: client disconnected"
+2026-04-28T07:37:19Z ERR Connection terminated error="connection with edge closed" connIndex=0
+2026-04-28T07:37:39Z INF Registered tunnel connection connIndex=0 connection=92291779-eaed-4d36-b240-50a22aded670 event=0 ip=198.41.200.233 location=hkg13 protocol=http2

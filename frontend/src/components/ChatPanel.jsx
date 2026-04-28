@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
+import ThemeToggle from './ThemeToggle'
 
 const REQUEST_TIMEOUT_MS = 90000
 
@@ -121,7 +122,7 @@ function MessageActions({ copyLabel, copiedLabel, query, onRetry, retryLabel, te
   )
 }
 
-export default function ChatPanel({ apiBase, language }) {
+export default function ChatPanel({ apiBase, theme, setTheme, language }) {
   const copy = COPY[language] || COPY.en
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
@@ -439,6 +440,9 @@ export default function ChatPanel({ apiBase, language }) {
           </div>
         </div>
         <div className="chat-box" ref={chatBoxRef}>
+          <div className="chat-box-toolbar">
+            <ThemeToggle theme={theme} setTheme={setTheme} language={language} />
+          </div>
           {messages
             .filter((message) => !(message.hiddenWhilePending && !message.text.trim()))
             .map((message) => (

@@ -940,3 +940,302 @@ ConnectionResetError: [Errno 104] Connection reset by peer
 13.212.121.181 - - [26/Apr/2026 13:15:46] "GET /assets/index-4JnXYO-6.js HTTP/1.1" 200 -
 13.212.121.181 - - [26/Apr/2026 13:15:47] "GET /sheet.png HTTP/1.1" 200 -
 13.212.121.181 - - [26/Apr/2026 13:15:47] "GET /pepe.png HTTP/1.1" 200 -
+47.251.96.9 - - [26/Apr/2026 13:49:53] code 400, message Bad request version ('À\\x13À')
+47.251.96.9 - - [26/Apr/2026 13:49:53] "\x16\x03\x01\x00î\x01\x00\x00ê\x03\x03I\x06²ù¼\x99iÀYûøºe-\x83Ud]\x0e\x8d·b8´gÆÝ9dZ8f gÁ\x81i³öòË°©\x19NÖ½\x95g|püé<Z¡\x90T·é¥8'O;\x00&À+À/À,À0Ì©Ì¨À\x09À\x13À" 400 -
+47.251.96.9 - - [26/Apr/2026 13:50:03] "GET / HTTP/1.1" 200 -
+47.251.96.9 - - [26/Apr/2026 13:50:04] "GET / HTTP/1.1" 200 -
+123.160.223.75 - - [26/Apr/2026 13:50:18] "GET / HTTP/1.1" 200 -
+45.92.19.139 - - [26/Apr/2026 13:50:19] "GET / HTTP/1.1" 200 -
+45.92.19.139 - - [26/Apr/2026 13:50:21] "GET /assets/index-4JnXYO-6.js HTTP/1.1" 200 -
+123.160.223.75 - - [26/Apr/2026 13:50:26] "GET /logo.png?v=4 HTTP/1.1" 200 -
+204.76.203.225 - - [26/Apr/2026 15:19:25] code 501, message Unsupported method ('CONNECT')
+204.76.203.225 - - [26/Apr/2026 15:19:25] "CONNECT proxy2.proxiesfood.com:443 HTTP/1.1" 501 -
+204.76.203.226 - - [26/Apr/2026 15:19:26] code 501, message Unsupported method ('CONNECT')
+204.76.203.226 - - [26/Apr/2026 15:19:26] "CONNECT proxy2.proxiesfood.com:443 HTTP/1.1" 501 -
+----------------------------------------
+Exception occurred during processing of request from ('204.76.203.224', 1483)
+Traceback (most recent call last):
+  File "/usr/lib/python3.10/socketserver.py", line 683, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.10/http/server.py", line 1304, in finish_request
+    self.RequestHandlerClass(request, client_address, self,
+  File "/usr/lib/python3.10/http/server.py", line 668, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.10/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.10/http/server.py", line 433, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.10/http/server.py", line 401, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+  File "/usr/lib/python3.10/socket.py", line 705, in readinto
+    return self._sock.recv_into(b)
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+----------------------------------------
+Exception occurred during processing of request from ('204.76.203.73', 7613)
+Traceback (most recent call last):
+  File "/usr/lib/python3.10/socketserver.py", line 683, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.10/http/server.py", line 1304, in finish_request
+    self.RequestHandlerClass(request, client_address, self,
+  File "/usr/lib/python3.10/http/server.py", line 668, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.10/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.10/http/server.py", line 433, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.10/http/server.py", line 401, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+  File "/usr/lib/python3.10/socket.py", line 705, in readinto
+    return self._sock.recv_into(b)
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+35.203.210.84 - - [27/Apr/2026 01:37:19] "GET / HTTP/1.1" 200 -
+85.217.140.20 - - [27/Apr/2026 05:42:22] "GET / HTTP/1.1" 200 -
+91.134.18.19 - - [27/Apr/2026 05:42:22] "GET /logo.png?v=4 HTTP/1.1" 200 -
+127.0.0.1 - - [27/Apr/2026 08:11:23] code 404, message File not found
+127.0.0.1 - - [27/Apr/2026 08:11:23] "GET /robots.txt HTTP/1.1" 404 -
+127.0.0.1 - - [27/Apr/2026 08:11:23] code 404, message File not found
+127.0.0.1 - - [27/Apr/2026 08:11:23] "GET /robots.txt HTTP/1.1" 404 -
+47.129.198.91 - - [27/Apr/2026 08:58:38] "GET / HTTP/1.1" 304 -
+47.129.198.91 - - [27/Apr/2026 08:58:38] "GET /assets/index-C7BSDn-o.css HTTP/1.1" 304 -
+47.129.198.91 - - [27/Apr/2026 08:58:38] "GET /assets/index-4JnXYO-6.js HTTP/1.1" 304 -
+47.129.198.91 - - [27/Apr/2026 08:58:38] "GET /pepe.png HTTP/1.1" 304 -
+47.129.198.91 - - [27/Apr/2026 08:58:38] "GET /sheet.png HTTP/1.1" 304 -
+91.230.168.92 - - [27/Apr/2026 10:18:09] code 400, message Bad request version ('À#À¬À®À+À')
+91.230.168.92 - - [27/Apr/2026 10:18:09] "\x16\x03\x03\x01¨\x01\x00\x01¤\x03\x03§\x1eÉB©(Ã3ôÍ8«\x14m\x96ó$/çgÒVñâû¾Ô¿!¸kØ £A\x0bü@Ù­æÑ\x10JO\x8dd'*\x93\x86û\x1cB\x98îÎ.Ü3èêÀ4\x0c\x00\x8a\x00\x16\x003\x00gÀ\x9eÀ¢\x00\x9e\x009\x00kÀ\x9fÀ£\x00\x9f\x00E\x00¾\x00\x88\x00Ä\x00\x9aÀ\x08À\x09À#À¬À®À+À" 400 -
+91.230.168.214 - - [27/Apr/2026 10:18:13] "GET / HTTP/1.1" 200 -
+91.230.168.178 - - [27/Apr/2026 10:20:13] "GET /logo.png HTTP/1.1" 200 -
+222.76.181.110 - - [27/Apr/2026 11:28:02] "GET / HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:03] "GET / HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:03] "GET /assets/index-C6qmBUxi.css HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:03] "GET /assets/index-CLYelc_9.js HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:03] "GET /logo.png?v=4 HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:03] "GET /pepe.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:03] "GET /sheet.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:27] "GET / HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:27] "GET /assets/index-C6qmBUxi.css HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:27] "GET /assets/index-CLYelc_9.js HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:28] "GET /sheet.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:28] "GET /pepe.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:28:28] "GET /logo.png?v=4 HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:30:11] "GET / HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:30:12] "GET /assets/index-BaiPSMDZ.css HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:30:12] "GET /assets/index-B-U5bsGf.js HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:30:12] "GET /pepe.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:30:12] "GET /sheet.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:30:12] "GET /logo.png?v=4 HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:35:48] "GET / HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:35:48] "GET /assets/index-BaiPSMDZ.css HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:35:48] "GET /assets/index-B-U5bsGf.js HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:35:48] "GET /pepe.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:35:48] "GET /sheet.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:39:55] "GET / HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:39:56] "GET /assets/index-rY-IFang.css HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:39:56] "GET /assets/index-O1glNcoE.js HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:39:56] "GET /pepe.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:39:56] "GET /sheet.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:39:56] "GET /logo.png?v=4 HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:42:43] "GET / HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:42:43] "GET /assets/index-O1glNcoE.js HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:42:43] "GET /assets/index-rY-IFang.css HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:42:43] "GET /pepe.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:42:43] "GET /sheet.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:47:41] "GET / HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:47:41] "GET /assets/index-CyEyEuoe.css HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:47:41] "GET /assets/index-BZWoFNwz.js HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:47:42] "GET /sheet.png HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:47:42] "GET /logo.png?v=4 HTTP/1.1" 200 -
+3.0.209.96 - - [27/Apr/2026 11:47:42] "GET /pepe.png HTTP/1.1" 200 -
+47.129.196.240 - - [27/Apr/2026 12:22:51] "GET / HTTP/1.1" 200 -
+47.129.196.240 - - [27/Apr/2026 12:22:51] "GET /assets/index-CyEyEuoe.css HTTP/1.1" 200 -
+47.129.196.240 - - [27/Apr/2026 12:22:51] "GET /assets/index-BZWoFNwz.js HTTP/1.1" 200 -
+47.129.196.240 - - [27/Apr/2026 12:22:52] "GET /sheet.png HTTP/1.1" 200 -
+47.129.196.240 - - [27/Apr/2026 12:22:52] "GET /pepe.png HTTP/1.1" 200 -
+47.129.196.240 - - [27/Apr/2026 12:22:52] "GET /logo.png?v=4 HTTP/1.1" 200 -
+47.129.196.240 - - [27/Apr/2026 12:22:56] "GET / HTTP/1.1" 200 -
+194.165.16.166 - - [27/Apr/2026 14:36:07] code 400, message Bad HTTP/0.9 request type ('\\x03\\x00\\x00/*à\\x00\\x00\\x00\\x00\\x00Cookie:')
+194.165.16.166 - - [27/Apr/2026 14:36:07] "\x03\x00\x00/*à\x00\x00\x00\x00\x00Cookie: mstshash=Administr" 400 -
+13.229.141.39 - - [27/Apr/2026 18:36:25] "GET / HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:36:26] "GET /assets/index-BZWoFNwz.js HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:36:26] "GET /assets/index-CyEyEuoe.css HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:36:26] "GET /pepe.png HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:36:26] "GET /sheet.png HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:36:49] "GET / HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:36:49] "GET /sheet.png HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:36:49] "GET /pepe.png HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:36:49] "GET /logo.png?v=4 HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:38:31] "GET / HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:38:31] "GET /assets/index-DU_GKmbx.js HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:38:31] "GET /assets/index-i7TMaiFo.css HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:38:39] "GET / HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:38:39] "GET /assets/index-DU_GKmbx.js HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:38:39] "GET /assets/index-i7TMaiFo.css HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:38:40] "GET /pepe.png HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:38:40] "GET /sheet.png HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:38:40] "GET /logo.png?v=4 HTTP/1.1" 200 -
+112.48.4.134 - - [27/Apr/2026 18:41:04] "GET / HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:42:43] "GET / HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:42:43] "GET /assets/index-C7BSDn-o.css HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:42:43] "GET /assets/index-4JnXYO-6.js HTTP/1.1" 200 -
+45.202.249.145 - - [27/Apr/2026 18:45:02] "GET / HTTP/1.1" 200 -
+45.202.249.145 - - [27/Apr/2026 18:45:03] "GET /assets/index-4JnXYO-6.js HTTP/1.1" 200 -
+45.202.249.145 - - [27/Apr/2026 18:45:03] "GET /assets/index-C7BSDn-o.css HTTP/1.1" 200 -
+45.202.249.145 - - [27/Apr/2026 18:45:04] "GET /pepe.png HTTP/1.1" 200 -
+45.202.249.145 - - [27/Apr/2026 18:45:04] "GET /sheet.png HTTP/1.1" 200 -
+45.202.249.145 - - [27/Apr/2026 18:45:05] "GET /logo.png?v=4 HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:45:37] "GET / HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:45:37] "GET /assets/index-C7BSDn-o.css HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:45:37] "GET /assets/index-4JnXYO-6.js HTTP/1.1" 304 -
+13.229.141.39 - - [27/Apr/2026 18:55:31] "GET / HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:55:31] "GET /assets/index-6mfYn4qz.css HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 18:55:31] "GET /assets/index-DMbCuw8_.js HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:00:47] "GET / HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:00:48] "GET /assets/index-D87XpRGD.js HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:00:48] "GET /assets/index-BKi0O-13.css HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:00:48] "GET /sheet.png HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:00:48] "GET /logo.png?v=4 HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:01:14] "GET / HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:01:14] "GET /assets/index-BKi0O-13.css HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:01:14] "GET /assets/index-D87XpRGD.js HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:01:20] "GET / HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:01:20] "GET /assets/index-D87XpRGD.js HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:01:20] "GET /assets/index-BKi0O-13.css HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:01:20] "GET /sheet.png HTTP/1.1" 200 -
+13.229.141.39 - - [27/Apr/2026 19:01:20] "GET /logo.png?v=4 HTTP/1.1" 200 -
+127.0.0.1 - - [27/Apr/2026 19:46:23] "HEAD / HTTP/1.1" 200 -
+112.48.4.134 - - [28/Apr/2026 04:23:45] "HEAD / HTTP/1.1" 200 -
+13.214.219.182 - - [28/Apr/2026 04:24:23] "GET / HTTP/1.1" 200 -
+13.214.219.182 - - [28/Apr/2026 04:24:23] "GET /assets/index-B6NnzU42.css HTTP/1.1" 200 -
+13.214.219.182 - - [28/Apr/2026 04:24:23] "GET /assets/index-iFMncV00.js HTTP/1.1" 200 -
+13.214.219.182 - - [28/Apr/2026 04:24:24] "GET /sheet.png HTTP/1.1" 200 -
+13.214.219.182 - - [28/Apr/2026 04:24:24] "GET /logo.png?v=4 HTTP/1.1" 200 -
+45.149.92.7 - - [28/Apr/2026 04:27:45] "GET /?v=1777350464389 HTTP/1.1" 200 -
+45.149.92.7 - - [28/Apr/2026 04:27:45] "GET /assets/index-B6NnzU42.css HTTP/1.1" 200 -
+45.149.92.7 - - [28/Apr/2026 04:27:45] "GET /assets/index-CSssdlw2.js HTTP/1.1" 200 -
+45.149.92.7 - - [28/Apr/2026 04:27:46] "GET /sheet.png HTTP/1.1" 200 -
+45.149.92.7 - - [28/Apr/2026 04:27:46] "GET /logo.png?v=4 HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:29:29] "GET /?v=1777350568752 HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:29:29] "GET /assets/index-DXT0T35C.js HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:29:29] "GET /assets/index-B6NnzU42.css HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:29:29] "GET /sheet.png HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:29:29] "GET /logo.png?v=4 HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:30:03] "GET /?v=1777350602968 HTTP/1.1" 200 -
+50.7.250.106 - - [28/Apr/2026 04:30:03] "GET /assets/index-B6NnzU42.css HTTP/1.1" 200 -
+50.7.250.106 - - [28/Apr/2026 04:30:03] "GET /assets/index-DXT0T35C.js HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:30:04] "GET /logo.png?v=4 HTTP/1.1" 200 -
+50.7.250.106 - - [28/Apr/2026 04:30:04] "GET / HTTP/1.1" 200 -
+50.7.250.106 - - [28/Apr/2026 04:30:04] "GET /assets/index-B6NnzU42.css HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:30:05] "GET /assets/index-DXT0T35C.js HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:30:05] "GET /sheet.png HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:30:05] "GET /logo.png?v=4 HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:31:55] "GET /?v=1777350715056 HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:31:55] "GET /assets/index-D1YmV-Az.css HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:31:55] "GET /assets/index-JuiTQHQS.js HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:31:56] "GET /sheet.png HTTP/1.1" 200 -
+50.7.250.50 - - [28/Apr/2026 04:31:56] "GET /logo.png?v=4 HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:38:06] "GET / HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:38:06] "GET /assets/index-JuiTQHQS.js HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:38:06] "GET /assets/index-D1YmV-Az.css HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:38:07] "GET /sheet.png HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:38:07] "GET /logo.png?v=4 HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:44:21] "GET / HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:44:21] "GET /assets/index-JuiTQHQS.js HTTP/1.1" 304 -
+13.214.164.240 - - [28/Apr/2026 04:44:21] "GET /assets/index-D1YmV-Az.css HTTP/1.1" 304 -
+13.214.164.240 - - [28/Apr/2026 04:44:22] "GET /sheet.png HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:44:22] "GET /logo.png?v=4 HTTP/1.1" 304 -
+13.214.164.240 - - [28/Apr/2026 04:45:33] "GET / HTTP/1.1" 304 -
+13.214.164.240 - - [28/Apr/2026 04:45:35] "GET / HTTP/1.1" 304 -
+13.214.164.240 - - [28/Apr/2026 04:47:41] "GET /?v=1777351661644 HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:47:42] "GET /assets/index-bwEJmC1I.css HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:47:42] "GET /assets/index-CbV0KJcm.js HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:47:42] "GET /sheet.png HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:47:42] "GET /logo.png?v=4 HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:48:32] "GET / HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:48:32] "GET /assets/index-bwEJmC1I.css HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:48:32] "GET /assets/index-CbV0KJcm.js HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:48:32] "GET /sheet.png HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:51:55] "GET /?v=1777351915183 HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:51:55] "GET /assets/index-CXC9bHZU.js HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:51:55] "GET /assets/index-CMxnPeUC.css HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:51:55] "GET /sheet.png HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:51:56] "GET /logo.png?v=4 HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:01] "GET /?v=1777352041747 HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:02] "GET /assets/index-qMidATOk.css HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:02] "GET /assets/index-0FK9C0s8.js HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:02] "GET /sheet.png HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:02] "GET /logo.png?v=4 HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:59] "GET / HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:59] "GET /assets/index-qMidATOk.css HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:59] "GET /assets/index-0FK9C0s8.js HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:54:59] "GET /sheet.png HTTP/1.1" 200 -
+13.214.164.240 - - [28/Apr/2026 04:55:00] "GET /logo.png?v=4 HTTP/1.1" 200 -
+18.142.137.108 - - [28/Apr/2026 05:19:19] "GET / HTTP/1.1" 304 -
+18.142.137.108 - - [28/Apr/2026 05:19:19] "GET /assets/index-qMidATOk.css HTTP/1.1" 304 -
+18.142.137.108 - - [28/Apr/2026 05:19:19] "GET /assets/index-0FK9C0s8.js HTTP/1.1" 304 -
+18.142.137.108 - - [28/Apr/2026 05:19:19] "GET /sheet.png HTTP/1.1" 304 -
+127.0.0.1 - - [28/Apr/2026 05:36:40] code 404, message File not found
+127.0.0.1 - - [28/Apr/2026 05:36:40] "GET /robots.txt HTTP/1.1" 404 -
+127.0.0.1 - - [28/Apr/2026 05:36:43] code 404, message File not found
+127.0.0.1 - - [28/Apr/2026 05:36:43] "GET /robots.txt HTTP/1.1" 404 -
+85.217.149.61 - - [28/Apr/2026 05:49:21] "GET / HTTP/1.1" 200 -
+85.217.149.61 - - [28/Apr/2026 05:49:22] "GET /logo.png?v=4 HTTP/1.1" 200 -
+3.1.196.255 - - [28/Apr/2026 06:25:00] "GET / HTTP/1.1" 304 -
+3.1.196.255 - - [28/Apr/2026 06:25:00] "GET /assets/index-qMidATOk.css HTTP/1.1" 304 -
+3.1.196.255 - - [28/Apr/2026 06:25:00] "GET /assets/index-0FK9C0s8.js HTTP/1.1" 304 -
+3.1.196.255 - - [28/Apr/2026 06:25:00] "GET /logo.png?v=4 HTTP/1.1" 304 -
+66.90.98.146 - - [28/Apr/2026 07:37:22] "GET /?v=1777361808335 HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:37:26] "GET /assets/index-qMidATOk.css HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:37:40] "GET /assets/index-0FK9C0s8.js HTTP/1.1" 200 -
+----------------------------------------
+Exception occurred during processing of request from ('66.90.98.106', 35690)
+Traceback (most recent call last):
+  File "/usr/lib/python3.10/socketserver.py", line 683, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.10/http/server.py", line 1304, in finish_request
+    self.RequestHandlerClass(request, client_address, self,
+  File "/usr/lib/python3.10/http/server.py", line 668, in __init__
+    super().__init__(*args, **kwargs)
+  File "/usr/lib/python3.10/socketserver.py", line 747, in __init__
+    self.handle()
+  File "/usr/lib/python3.10/http/server.py", line 433, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.10/http/server.py", line 421, in handle_one_request
+    method()
+  File "/usr/lib/python3.10/http/server.py", line 675, in do_GET
+    self.copyfile(f, self.wfile)
+  File "/usr/lib/python3.10/http/server.py", line 875, in copyfile
+    shutil.copyfileobj(source, outputfile)
+  File "/usr/lib/python3.10/shutil.py", line 198, in copyfileobj
+    fdst_write(buf)
+  File "/usr/lib/python3.10/socketserver.py", line 826, in write
+    self._sock.sendall(b)
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+66.90.98.106 - - [28/Apr/2026 07:38:42] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 07:40:21] "GET / HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:42:25] "GET /?v=1777362144481 HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:42:25] "GET /assets/index-DRZqAOvq.js HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:42:25] "GET /assets/index-DjwQqF5S.css HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:42:26] "GET /sheet.png HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:42:26] "GET /logo.png?v=4 HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:55:04] "GET /?v=1777362904156 HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:55:05] "GET /assets/index-DRZqAOvq.js HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:55:05] "GET /assets/index-DjwQqF5S.css HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:55:06] "GET /sheet.png HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:55:06] "GET /logo.png?v=4 HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:56:20] "GET /?v=1777362979777 HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:56:21] "GET /assets/index-DjwQqF5S.css HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:56:21] "GET /assets/index-DRZqAOvq.js HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:59:48] "GET /?v=1777363188054 HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:59:49] "GET /assets/index-DjwQqF5S.css HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 07:59:49] "GET /assets/index-DRZqAOvq.js HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 16:28:13] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 16:29:05] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 16:29:05] "HEAD / HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 16:30:08] "GET / HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 16:31:11] "GET / HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 16:31:11] "GET /assets/index-DRZqAOvq.js HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 16:31:11] "GET /assets/index-DjwQqF5S.css HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 16:31:12] "GET /sheet.png HTTP/1.1" 200 -
+66.90.98.106 - - [28/Apr/2026 16:31:13] "GET /logo.png?v=4 HTTP/1.1" 200 -

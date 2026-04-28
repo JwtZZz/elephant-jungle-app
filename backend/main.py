@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import time
 import threading
+import json
 from html import unescape
 import re
 import xml.etree.ElementTree as ET
@@ -17,6 +18,8 @@ from dotenv import load_dotenv
 from rag import DEFAULT_TOP_K, chat, ingest_document, search
 from store import init_db, sync_chroma_index
 from providers import ocr_image_data_url, translate_text, validate_provider_env
+from cache_store import get_json as cache_get_json, redis_status, set_json as cache_set_json
+from task_broker import get_job_status, publish_ingest_job, rabbitmq_status, start_ingest_worker
 
 
 app = FastAPI(title="Minimal RAG Backend", version="0.1.0")
@@ -30,6 +33,7 @@ market_cache: dict[str, object] = {
 }
 BRIEFS_CACHE_TTL_SECONDS = 5 * 60 * 60
 briefs_cache: dict[str, object] = {"timestamp": 0.0, "payload": {}}
+BRIEFS_CACHE_PATH = Path(__file__).resolve().parent / "briefs_cache.json"
 TIMELINE_CACHE_TTL_SECONDS = 15 * 60
 TIMELINE_PREWARM_INTERVAL_SECONDS = 10 * 60
 TIMELINE_PREWARM_ASSETS = [
@@ -155,7 +159,11 @@ def fetch_okx_market_detail(symbol: str, interval: str = "15m", candle_limit: in
     inst_id = build_okx_inst_id(symbol)
     bar = map_okx_bar(interval)
     cache_key = f"{inst_id}:{bar}:{candle_limit}:{depth_limit}"
+    redis_key = f"market:okx-detail:{cache_key}"
     now = time.time()
+    redis_cached = cache_get_json(redis_key)
+    if isinstance(redis_cached, dict):
+        return redis_cached
     cached = okx_detail_cache.get(cache_key)
     if cached and (now - cached.get("timestamp", 0.0)) < OKX_DETAIL_TTL_SECONDS:
         return cached["payload"]
@@ -229,6 +237,7 @@ def fetch_okx_market_detail(symbol: str, interval: str = "15m", candle_limit: in
         "orderbook": {"bids": bids, "asks": asks},
     }
     okx_detail_cache[cache_key] = {"timestamp": now, "payload": payload}
+    cache_set_json(redis_key, payload, OKX_DETAIL_TTL_SECONDS)
     return payload
 
 
@@ -248,6 +257,9 @@ def serialize_market_coin(coin: dict) -> dict:
 
 def fetch_market_coins() -> list[dict]:
     now = time.time()
+    redis_live = cache_get_json("market:coins:live")
+    if isinstance(redis_live, list) and redis_live:
+        return redis_live
     cached_coins = market_cache.get("coins", [])
     base_at = float(market_cache.get("base_timestamp", 0.0))
     live_at = float(market_cache.get("live_timestamp", 0.0))
@@ -334,7 +346,9 @@ def fetch_market_coins() -> list[dict]:
 
     market_cache["live_timestamp"] = now
     market_cache["coins"] = updated_coins
-    return [serialize_market_coin(coin) for coin in updated_coins]
+    serialized = [serialize_market_coin(coin) for coin in updated_coins]
+    cache_set_json("market:coins:live", serialized, MARKET_LIVE_TTL_SECONDS)
+    return serialized
 
 
 def strip_html(value: str) -> str:
@@ -368,32 +382,99 @@ def parse_rss_items(xml_text: str, limit: int = 8) -> list[dict]:
     return items
 
 
+def has_brief_items(payload: dict | object, key: str) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return bool(payload.get(key))
+
+
+def load_persisted_briefs() -> dict[str, list[dict]]:
+    try:
+        if not BRIEFS_CACHE_PATH.exists():
+            return {}
+        payload = json.loads(BRIEFS_CACHE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            "social": payload.get("social") if isinstance(payload.get("social"), list) else [],
+            "news": payload.get("news") if isinstance(payload.get("news"), list) else [],
+        }
+    except Exception:
+        return {}
+
+
+def save_persisted_briefs(payload: dict[str, list[dict]]) -> None:
+    try:
+        safe_payload = {
+            "social": payload.get("social") or [],
+            "news": payload.get("news") or [],
+            "updated_at": int(time.time()),
+        }
+        BRIEFS_CACHE_PATH.write_text(json.dumps(safe_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def fetch_market_briefs() -> dict:
     now = time.time()
+    redis_cached = cache_get_json("market:briefs")
+    if (
+        isinstance(redis_cached, dict)
+        and has_brief_items(redis_cached, "social")
+        and has_brief_items(redis_cached, "news")
+    ):
+        return dict(redis_cached)
     cached_payload = briefs_cache.get("payload", {})
     cached_at = float(briefs_cache.get("timestamp", 0.0))
-    if cached_payload and (now - cached_at) < BRIEFS_CACHE_TTL_SECONDS:
+    if (
+        cached_payload
+        and (now - cached_at) < BRIEFS_CACHE_TTL_SECONDS
+        and has_brief_items(cached_payload, "social")
+        and has_brief_items(cached_payload, "news")
+    ):
         return dict(cached_payload)
 
     feeds = {
-        "social": "https://news.google.com/rss/search?q=site:x.com+(bitcoin+OR+ethereum+OR+solana+OR+crypto)+when:1d&hl=en-US&gl=US&ceid=US:en",
-        "news": "https://news.google.com/rss/search?q=(bitcoin+OR+ethereum+OR+crypto)+finance+when:1d&hl=en-US&gl=US&ceid=US:en",
+        "social": [
+            "https://news.google.com/rss/search?q=site:x.com+(bitcoin+OR+ethereum+OR+solana+OR+crypto)+when:7d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=(bitcoin+OR+ethereum+OR+solana+OR+crypto)+(X+OR+Twitter+OR+social)+when:7d&hl=en-US&gl=US&ceid=US:en",
+        ],
+        "news": [
+            "https://news.google.com/rss/search?q=(bitcoin+OR+ethereum+OR+crypto)+finance+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=(bitcoin+OR+ethereum+OR+crypto)+finance+when:7d&hl=en-US&gl=US&ceid=US:en",
+        ],
     }
 
-    payload: dict[str, list[dict]] = {}
+    persisted_payload = load_persisted_briefs()
+    payload: dict[str, list[dict]] = {
+        "social": list(persisted_payload.get("social") or []),
+        "news": list(persisted_payload.get("news") or []),
+    }
+    fetched_any = False
     try:
         with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-            for key, url in feeds.items():
-                response = client.get(url)
-                response.raise_for_status()
-                payload[key] = parse_rss_items(response.text, limit=8)
+            for key, urls in feeds.items():
+                for url in urls:
+                    response = client.get(url)
+                    response.raise_for_status()
+                    items = parse_rss_items(response.text, limit=8)
+                    if items:
+                        payload[key] = items
+                        fetched_any = True
+                        break
     except Exception:
         if cached_payload:
             return dict(cached_payload)
+        if payload.get("social") or payload.get("news"):
+            return payload
         raise
+
+    if fetched_any:
+        save_persisted_briefs(payload)
 
     briefs_cache["timestamp"] = now
     briefs_cache["payload"] = payload
+    cache_set_json("market:briefs", payload, BRIEFS_CACHE_TTL_SECONDS)
     return payload
 
 
@@ -414,6 +495,11 @@ def translate_title_cached(title: str, language: str) -> str:
         return clean_title
     if re.search(r"[\u4e00-\u9fff]", clean_title):
         return clean_title
+    redis_key = f"market:title-translation:zh:{clean_title}"
+    redis_cached = cache_get_json(redis_key)
+    if isinstance(redis_cached, str) and redis_cached:
+        title_translation_cache[clean_title] = redis_cached
+        return redis_cached
     cached = title_translation_cache.get(clean_title)
     if cached:
         return cached
@@ -422,6 +508,7 @@ def translate_title_cached(title: str, language: str) -> str:
     except Exception:
         translated = clean_title
     title_translation_cache[clean_title] = translated or clean_title
+    cache_set_json(redis_key, title_translation_cache[clean_title], TIMELINE_CACHE_TTL_SECONDS)
     return title_translation_cache[clean_title]
 
 
@@ -430,7 +517,11 @@ def fetch_market_timeline(symbol: str, name: str, language: str = "en") -> list[
     normalized_name = (name or "").strip()
     normalized_language = (language or "en").strip().lower()
     cache_key = f"{normalized_symbol}:{normalized_name}:{normalized_language}"
+    redis_key = f"market:timeline:{cache_key}"
     now = time.time()
+    redis_cached = cache_get_json(redis_key)
+    if isinstance(redis_cached, list):
+        return list(redis_cached)
     cached = timeline_cache.get(cache_key)
     if cached and (now - cached.get("timestamp", 0.0)) < TIMELINE_CACHE_TTL_SECONDS:
         return list(cached.get("items", []))
@@ -460,7 +551,31 @@ def fetch_market_timeline(symbol: str, name: str, language: str = "en") -> list[
         return []
 
     timeline_cache[cache_key] = {"timestamp": now, "items": items}
+    cache_set_json(redis_key, items, TIMELINE_CACHE_TTL_SECONDS)
     return items
+
+
+def request_payload(req: IngestRequest) -> dict:
+    if hasattr(req, "model_dump"):
+        return req.model_dump()
+    return req.dict()
+
+
+def process_ingest_payload(payload: dict) -> dict:
+    return ingest_document(
+        source=payload.get("source") or "manual",
+        title=payload.get("title"),
+        url=payload.get("url"),
+        published_at=payload.get("published_at"),
+        doc_type=payload.get("doc_type"),
+        project=payload.get("project"),
+        category=payload.get("category"),
+        region=payload.get("region"),
+        source_type=payload.get("source_type"),
+        language=payload.get("language"),
+        summary=payload.get("summary"),
+        content=payload.get("content") or "",
+    )
 
 
 def prewarm_market_timeline_once() -> None:
@@ -492,6 +607,7 @@ def on_startup() -> None:
     sync_chroma_index()
     validate_provider_env()
     start_timeline_prewarm()
+    start_ingest_worker(process_ingest_payload)
 
 
 @app.get("/market/timeline/prewarm")
@@ -502,28 +618,36 @@ def market_timeline_prewarm() -> dict:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "providers": "ready"}
+    return {
+        "ok": True,
+        "providers": "ready",
+        "redis": redis_status(),
+        "rabbitmq": rabbitmq_status(),
+    }
 
 
 @app.post("/ingest")
-def ingest(req: IngestRequest) -> dict:
+def ingest(req: IngestRequest, queue: bool = Query(False)) -> dict:
     try:
-        return ingest_document(
-            source=req.source,
-            title=req.title,
-            url=req.url,
-            published_at=req.published_at,
-            doc_type=req.doc_type,
-            project=req.project,
-            category=req.category,
-            region=req.region,
-            source_type=req.source_type,
-            language=req.language,
-            summary=req.summary,
-            content=req.content,
-        )
+        payload = request_payload(req)
+        if queue:
+            return publish_ingest_job(payload)
+        return process_ingest_payload(payload)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/ingest/queued")
+def queued_ingest(req: IngestRequest) -> dict:
+    try:
+        return publish_ingest_job(request_payload(req))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/ingest/jobs/{job_id}")
+def ingest_job(job_id: str) -> dict:
+    return get_job_status(job_id)
 
 
 @app.post("/search")

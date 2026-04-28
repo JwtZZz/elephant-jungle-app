@@ -1,22 +1,21 @@
-DASHSCOPE_API_KEY=your_dashscope_key
+DASHSCOPE_API_KEY=  sk-1f86c86997a84be2a7aae50c978dfa29
 ALI_EMBEDDING_MODEL=text-embedding-v4
 ALI_EMBEDDING_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings
-ALI_OCR_MODEL=qwen-vl-ocr-latest
-ALI_OCR_FALLBACK_MODELS=qwen-vl-ocr,qwen-vl-plus
-ALI_VISION_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
 
 CHAT_PROVIDER=nvidia
-NVIDIA_API_KEY=your_nvidia_key
-NVIDIA_MODEL=z-ai/glm5
+NVIDIA_API_KEY=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
+NVIDIA_MODEL=meta/llama-3.1-70b-instruct
 NVIDIA_CHAT_URL=https://integrate.api.nvidia.com/v1/chat/completions
 
-MINIMAX_API_KEY=your_minimax_key
+MINIMAX_API_KEY=sk-cp-3uEzzWD8hSYoIN43rxg3JjY_pKyZLA3ldbzyRO8rYEFRpMRjIXykXHghUu2HZNDTXVcZAZMls9mFdNSFfWTg2tIkTdiE3ArJUMEIliEeRQ5XEH9YYiv5yd4
 MINIMAX_MODEL=MiniMax-M2.7
 MINIMAX_CHAT_URL=https://api.minimax.chat/v1/text/chatcompletion_v2
+NEWSDATA_API_KEY=pub_4baa99c396034568b3aba4d9c373c4d8
+ALI_OCR_MODEL=qwen-vl-ocr-latest
+ALI_OCR_FALLBACK_MODELS=qwen-vl-ocr,qwen-vl-plus
 
 REDIS_URL=redis://localhost:6379/0
 REDIS_KEY_PREFIX=elephant
-
 RABBITMQ_URL=amqp://guest:guest@localhost:5672/%2F
 RABBITMQ_QUEUE=elephant.rag.ingest
 RABBITMQ_WORKER_ENABLED=true

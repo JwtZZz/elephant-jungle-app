@@ -4,7 +4,7 @@ const COPY = {
     social: 'Social commentary',
     finance: 'Finance News',
     latest: 'Latest headlines',
-    updated: 'Updated every five hours. Scroll inside this panel to browse the latest items without stretching the whole page.',
+    updated: 'Updated every five hours. The page scroll keeps the full rail visible.',
     fallback: 'Open the source for the full thread or article.',
     source: 'Source',
   },
@@ -13,7 +13,7 @@ const COPY = {
     social: '社交评论',
     finance: '财经新闻',
     latest: '最新标题',
-    updated: '每五小时更新一次。可以直接在这个面板里滚动查看，而不用拉长整个页面。',
+    updated: '每五小时更新一次。跟随页面下拉查看，不再放进单独滚动框。',
     fallback: '打开原文查看完整帖子或文章。',
     source: '来源',
   },
@@ -45,9 +45,9 @@ export default function NewsPanels({ briefs, language }) {
   const copy = COPY[language] || COPY.en
 
   return (
-    <div className="market-news-grid">
+    <>
       <NewsColumn title={copy.xWatch} kicker={copy.social} items={briefs.social} copy={copy} />
       <NewsColumn title={copy.finance} kicker={copy.latest} items={briefs.news} copy={copy} />
-    </div>
+    </>
   )
 }

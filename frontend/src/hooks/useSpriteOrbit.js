@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 const SPRITE_SIZE = 64
 const CRUISE_SPEED = 0.85
 const TYPING_SPEED = 2.2
+const JUMP_SPEED = 1.15
+const CRUISE_MODES = ['typing', 'dash', 'hop']
 
 function getTrackMetrics(track) {
   const width = Math.max(0, track.clientWidth - SPRITE_SIZE)
@@ -33,6 +35,7 @@ export function useSpriteOrbit(spriteSpecs) {
   const speedRef = useRef(CRUISE_SPEED)
   const frameRef = useRef(0)
   const timerRef = useRef(0)
+  const randomModeTimerRef = useRef(0)
   const lastTimeRef = useRef(0)
   const progressRef = useRef(spriteSpecs.map((_, index) => (index === 1 ? 9999 : 0)))
 
@@ -65,9 +68,30 @@ export function useSpriteOrbit(spriteSpecs) {
     return () => window.cancelAnimationFrame(frameRef.current)
   }, [spriteSpecs])
 
+  useEffect(() => {
+    const scheduleNextMode = () => {
+      const delay = 1800 + Math.random() * 2600
+      randomModeTimerRef.current = window.setTimeout(() => {
+        const nextMode = CRUISE_MODES[Math.floor(Math.random() * CRUISE_MODES.length)]
+        setMode(nextMode)
+        if (nextMode === 'dash') {
+          speedRef.current = TYPING_SPEED
+        } else if (nextMode === 'hop') {
+          speedRef.current = JUMP_SPEED
+        } else {
+          speedRef.current = CRUISE_SPEED
+        }
+        scheduleNextMode()
+      }, delay)
+    }
+
+    scheduleNextMode()
+    return () => window.clearTimeout(randomModeTimerRef.current)
+  }, [])
+
   const boost = () => {
     speedRef.current = TYPING_SPEED
-    setMode('typing')
+    setMode('dash')
     window.clearTimeout(timerRef.current)
     timerRef.current = window.setTimeout(() => {
       speedRef.current = CRUISE_SPEED
@@ -77,7 +101,6 @@ export function useSpriteOrbit(spriteSpecs) {
 
   const cruise = () => {
     speedRef.current = CRUISE_SPEED
-    setMode('typing')
     window.clearTimeout(timerRef.current)
   }
 

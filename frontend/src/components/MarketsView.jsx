@@ -32,7 +32,7 @@ const COPY = {
   zh: {
     back: '返回市场',
     timeline: '市场动态',
-    timelineCopy: '右侧这条新闻轨道会跟着首页主币种跑，用更像时间线的方式显示新闻。',
+    timelineCopy: '这条新闻轨道会跟着首页主币种跑，用更像时间线的方式显示新闻。',
     source: '来源',
     loading: '正在加载相关新闻...',
     empty: '这个币暂时还没有抓到新的相关新闻。',
@@ -434,14 +434,18 @@ export default function MarketsView({ apiBase, marketRows, briefs, language }) {
   }
 
   return (
-    <div className="workspace-view active">
+    <div className="workspace-view active market-home-view">
       <div className="market-home-layout">
         <div className="market-shell market-shell-atmosphere">
           <div className="market-pixel-haze" aria-hidden="true" />
           <MarketBoard rows={marketRows} language={language} onSelectCoin={(coin) => setSelectedCoin(coin)} />
-          <NewsPanels briefs={briefs} language={language} />
+          <div className="market-lower-stack">
+            <div className="market-news-stack">
+              <NewsPanels briefs={briefs} language={language} />
+            </div>
+            {homeTimelineCoin ? <TimelinePanel apiBase={apiBase} coin={homeTimelineCoin} copy={copy} language={language} /> : null}
+          </div>
         </div>
-        {homeTimelineCoin ? <TimelinePanel apiBase={apiBase} coin={homeTimelineCoin} copy={copy} language={language} /> : null}
       </div>
     </div>
   )

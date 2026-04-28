@@ -23,15 +23,15 @@ export default function Sidebar({ activeView, onSelect, language }) {
   const sidebarSpriteTrackRef = useRef(null)
   const sidebarSpriteShellRef = useRef(null)
 
-  useSpriteOrbit([
+  const { spriteMode } = useSpriteOrbit([
     { trackRef: sidebarSpriteTrackRef, shellRef: sidebarSpriteShellRef, direction: 1 },
   ])
 
   return (
     <aside className="workspace-sidebar">
       <div className="sidebar-pepe-track" ref={sidebarSpriteTrackRef} aria-hidden="true">
-        <div className="pepe-shell facing-right" ref={sidebarSpriteShellRef}>
-          <div className="sidebar-pepe" />
+        <div className="sprite-shell facing-right" ref={sidebarSpriteShellRef}>
+          <div className={`sprite-avatar ${spriteMode}`} />
         </div>
       </div>
       <div className="brand-mark">
