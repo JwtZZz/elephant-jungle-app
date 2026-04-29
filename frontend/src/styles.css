@@ -842,12 +842,17 @@ button, input { font: inherit; }
   width: 100%;
   height: 100%;
   object-fit: cover;
-  position: relative;
+  position: absolute;
+  inset: 0;
   z-index: 1;
 }
 
 .meme-token-icon-fallback {
   position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   z-index: 0;
 }
 
@@ -1782,11 +1787,27 @@ button, input { font: inherit; }
   object-fit: cover;
 }
 
+.right-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.right-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: clamp(6px, 0.5vw, 10px) clamp(8px, 0.7vw, 14px) 0;
+  flex-shrink: 0;
+}
+
 .right-panel {
   min-width: 0;
-  padding: clamp(10px, 1vw, 16px) clamp(10px, 0.8vw, 14px) clamp(10px, 1vw, 16px) clamp(4px, 0.4vw, 8px);
+  padding: clamp(6px, 0.5vw, 10px) clamp(10px, 0.8vw, 14px) clamp(10px, 1vw, 16px) clamp(4px, 0.4vw, 8px);
   position: relative;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   overflow: hidden;
   display: flex;
@@ -1794,7 +1815,6 @@ button, input { font: inherit; }
 }
 
 .theme-toggle {
-  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1803,7 +1823,7 @@ button, input { font: inherit; }
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   box-shadow: 0 0 0 1px var(--shadow-lift);
-  z-index: 5;
+  flex-shrink: 0;
 }
 
 .theme-chip {
@@ -2241,6 +2261,7 @@ input:focus {
   .layout { display: flex; flex-direction: column; height: auto; min-height: 100vh; overflow: visible; }
   .main { height: auto; overflow: visible; padding: 20px; }
   .workspace-shell { grid-template-columns: 1fr; height: auto; }
+  .right-col { height: auto; }
   .right-panel { width: 100%; height: auto; padding: 24px 20px 28px; }
   .workspace-panel { min-height: min(720px, calc(100vh - 40px)); }
   .workspace-view { overflow: visible; }
@@ -2262,6 +2283,7 @@ input:focus {
   .main { padding: 16px; }
   .workspace-shell { gap: 12px; }
   .workspace-panel { padding: 20px; }
+  .right-col { height: auto; }
   .right-panel { padding: 18px 16px 24px; }
   .chat-stage { margin-top: 0; min-height: 420px; }
   .chat-stage::before { display: none; }

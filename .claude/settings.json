@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://127.0.0.1:5500/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5500/assets/index-BIcZktP1.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5500/assets/index-CS5tO2qX.css)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{url_effective}\" -L \"https://cdn.dexscreener.com/token-images/icon/solana/DauQPNZyWTDi7Bh3u9vc66Dn7ygbDDBky1Kq2HFCpump\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} → %{url_effective}\\\\n\" -L -H \"User-Agent: Mozilla/5.0\" -H \"Referer: https://dexscreener.com/\" -H \"Origin: https://dexscreener.com\" \"https://dd.dexscreener.com/ds-data/tokens/solana/DauQPNZyWTDi7Bh3u9vc66Dn7ygbDDBky1Kq2HFCpump.png?size=sm\")",
+      "Bash(curl -s http://127.0.0.1:5500/assets/index-P1cRXcIP.css)"
+    ]
+  }
+}
