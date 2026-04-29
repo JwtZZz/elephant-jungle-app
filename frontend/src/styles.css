@@ -180,26 +180,16 @@ button, input { font: inherit; }
 .brand-mark {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   padding: 6px 6px 2px;
 }
 
 .brand-title {
   color: var(--accent);
   font-family: var(--font-serif);
-  font-size: 28px;
-  line-height: 1.1;
+  font-size: 20px;
+  line-height: 1;
   letter-spacing: -0.03em;
-}
-
-.status-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 16%, transparent);
-  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .nav-list {
@@ -1061,7 +1051,7 @@ button, input { font: inherit; }
 .market-symbol {
   color: var(--text-primary);
   font-family: var(--font-serif);
-  font-size: clamp(13px, 0.88vw, 16px);
+  font-size: clamp(15px, 1vw, 18px);
   line-height: 1.05;
 }
 
@@ -1069,7 +1059,7 @@ button, input { font: inherit; }
   margin-top: 3px;
   color: var(--text-secondary);
   font-family: var(--font-serif);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.2;
 }
 
@@ -1080,7 +1070,7 @@ button, input { font: inherit; }
 .market-metric {
   color: var(--text-primary);
   font-family: var(--font-serif);
-  font-size: clamp(12px, 0.84vw, 15px);
+  font-size: clamp(14px, 0.95vw, 17px);
   line-height: 1.05;
 }
 
@@ -1100,7 +1090,7 @@ button, input { font: inherit; }
 .market-metric {
   color: var(--text-secondary);
   font-family: var(--font-serif);
-  font-size: clamp(11px, 0.76vw, 13px);
+  font-size: clamp(13px, 0.85vw, 15px);
   white-space: nowrap;
 }
 
