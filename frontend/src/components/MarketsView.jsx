@@ -436,8 +436,7 @@ export default function MarketsView({ apiBase, marketRows, briefs, language }) {
   return (
     <div className="workspace-view active market-home-view">
       <div className="market-home-layout">
-        <div className="market-shell market-shell-atmosphere">
-          <div className="market-pixel-haze" aria-hidden="true" />
+        <div className="market-shell">
           <MarketBoard rows={marketRows} language={language} onSelectCoin={(coin) => setSelectedCoin(coin)} />
           <div className="market-lower-stack">
             <div className="market-news-stack">

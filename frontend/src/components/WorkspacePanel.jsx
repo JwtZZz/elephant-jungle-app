@@ -23,7 +23,7 @@ export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs
         </div>
       </div>
       {activeView === 'markets' ? <MarketsView apiBase={apiBase} marketRows={marketRows} briefs={briefs} language={language} /> : null}
-      {activeView === 'agents' ? <AgentsView language={language} /> : null}
+      {activeView === 'agents' ? <AgentsView apiBase={apiBase} language={language} /> : null}
       {activeView === 'research' ? <SettingsView language={language} setLanguage={setLanguage} /> : null}
       {!['markets', 'agents', 'research'].includes(activeView) ? <EmptyView /> : null}
     </section>

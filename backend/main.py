@@ -727,3 +727,118 @@ def market_timeline(
         return {"items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+MEME_TRENDING_CACHE: dict = {"timestamp": 0.0, "tokens": []}
+MEME_TRENDING_TTL = 30
+
+
+def _format_meme_price(value: float | None) -> str:
+    if value is None:
+        return "--"
+    if value >= 1:
+        return f"${value:,.4f}"
+    if value >= 0.01:
+        return f"${value:,.6f}"
+    return f"${value:,.8f}"
+
+
+def fetch_meme_trending() -> list[dict]:
+    now = time.time()
+    if MEME_TRENDING_CACHE["tokens"] and (now - MEME_TRENDING_CACHE["timestamp"]) < MEME_TRENDING_TTL:
+        return list(MEME_TRENDING_CACHE["tokens"])
+
+    tokens: list[dict] = []
+    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+        boost_resp = client.get(
+            "https://api.dexscreener.com/token-boosts/latest/v1?chainId=solana&limit=30"
+        )
+        boost_resp.raise_for_status()
+        boosts = boost_resp.json()
+        if not isinstance(boosts, list):
+            return tokens
+
+        seen: set[str] = set()
+        for item in boosts:
+            address = (item.get("tokenAddress") or "").strip()
+            if not address or address in seen or address.startswith("0x"):
+                continue
+            seen.add(address)
+
+            symbol = ""
+            name = ""
+            price_usd = None
+            volume_h24 = None
+            price_change_h24 = None
+            txns_h24_buys = 0
+            txns_h24_sells = 0
+            icon_url = ""
+
+            try:
+                pair_resp = client.get(
+                    f"https://api.dexscreener.com/latest/dex/tokens/{address}"
+                )
+                pair_resp.raise_for_status()
+                pair_data = pair_resp.json()
+                pairs = pair_data.get("pairs") or []
+                if pairs:
+                    pair = pairs[0]
+                    base = pair.get("baseToken") or {}
+                    symbol = base.get("symbol", "")
+                    name = base.get("name", "")
+                    price_usd = float(pair.get("priceUsd", 0) or 0)
+                    vol = pair.get("volume") or {}
+                    volume_h24 = float(vol.get("h24", 0) or 0)
+                    price_change = pair.get("priceChange") or {}
+                    price_change_h24 = float(price_change.get("h24", 0) or 0)
+                    txns = pair.get("txns") or {}
+                    h24 = txns.get("h24") or {}
+                    txns_h24_buys = int(h24.get("buys", 0) or 0)
+                    txns_h24_sells = int(h24.get("sells", 0) or 0)
+            except Exception:
+                pass
+
+            description = (item.get("description") or "").strip()
+            icon_url = item.get("icon", "")
+            header_url = item.get("header", "")
+            token_url = item.get("url", f"https://dexscreener.com/solana/{address}")
+            links = item.get("links") or []
+            twitter_url = ""
+            website_url = ""
+            for link in links:
+                link_url = (link.get("url") or "").strip()
+                if not link_url:
+                    continue
+                if link.get("type") == "twitter" or "x.com" in link_url:
+                    twitter_url = link_url
+                elif not website_url:
+                    website_url = link_url
+
+            tokens.append({
+                "symbol": symbol or address[:6],
+                "name": name or description[:30],
+                "address": address,
+                "price": _format_meme_price(price_usd),
+                "volume24h": f"${volume_h24:,.0f}" if volume_h24 else "--",
+                "change24h": round(price_change_h24, 2) if price_change_h24 else 0,
+                "buys24h": txns_h24_buys,
+                "sells24h": txns_h24_sells,
+                "description": description,
+                "icon": icon_url,
+                "header": header_url,
+                "url": token_url,
+                "twitter": twitter_url,
+                "website": website_url,
+            })
+
+    MEME_TRENDING_CACHE["timestamp"] = now
+    MEME_TRENDING_CACHE["tokens"] = tokens
+    return tokens
+
+
+@app.get("/meme/trending")
+def meme_trending() -> dict:
+    try:
+        return {"tokens": fetch_meme_trending()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

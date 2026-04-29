@@ -55,57 +55,20 @@ body {
   overflow: hidden;
 }
 
-body::before,
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-repeat: repeat;
-  image-rendering: pixelated;
-  will-change: transform, opacity;
-}
-
-body::before {
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--accent) 32%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--accent) 18%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 18%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 10%, transparent) 0 0);
-  background-size: 5px 5px, 2px 2px, 1px 1px, 3px 3px;
-  background-position: 18px 22px, 71px 49px, 126px 15px, 204px 77px;
-  opacity: 0.16;
-  z-index: 0;
-  animation: pixel-drift-a 42s linear infinite;
-}
-
-body::after {
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 12%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--accent) 14%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 8%, transparent) 0 0);
-  background-size: 7px 7px, 1px 1px, 3px 3px, 2px 2px;
-  background-position: 43px 36px, 98px 92px, 173px 28px, 241px 64px;
-  opacity: 0.1;
-  z-index: 0;
-  animation: pixel-drift-b 56s linear infinite reverse;
-}
-
 button, input { font: inherit; }
 
 .layout {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(300px, 17vw, 332px);
+  grid-template-columns: minmax(0, 1fr) clamp(340px, 22vw, 420px);
   min-height: 100vh;
   height: 100dvh;
   overflow: hidden;
 }
 
 .main {
-  padding: clamp(16px, 1.7vw, 24px) clamp(6px, 0.55vw, 8px) clamp(16px, 1.7vw, 24px) clamp(16px, 1.7vw, 24px);
+  padding: clamp(10px, 1vw, 16px) clamp(4px, 0.35vw, 6px) clamp(10px, 1vw, 16px) clamp(10px, 1vw, 16px);
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -117,7 +80,7 @@ button, input { font: inherit; }
   min-height: 0;
   display: grid;
   grid-template-columns: clamp(188px, 13vw, 232px) minmax(0, 1fr);
-  gap: clamp(12px, 1.1vw, 16px);
+  gap: clamp(6px, 0.6vw, 10px);
 }
 
 .workspace-sidebar {
@@ -724,6 +687,7 @@ button, input { font: inherit; }
   padding-top: 10px;
   padding-bottom: 4px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg-surface) 0%, transparent) 0%, var(--bg-surface) 42%);
+  overflow: hidden;
 }
 
 .launch-primary-btn,
@@ -773,6 +737,195 @@ button, input { font: inherit; }
   font-size: 13px;
   line-height: 1.65;
   word-break: break-word;
+}
+
+/* ── Meme Pump Two-Column ── */
+.meme-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+  gap: clamp(12px, 1.1vw, 18px);
+  flex: 1;
+  min-height: 0;
+}
+
+.meme-left {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-warm) transparent;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+}
+
+.meme-right {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-warm) transparent;
+  overscroll-behavior: contain;
+  padding-left: 4px;
+}
+
+.meme-trending-header {
+  padding-bottom: 12px;
+}
+
+.meme-trending-copy {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.meme-trending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.meme-trending-empty {
+  min-height: 120px;
+  border: 1px dashed var(--border-warm);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-toggle-active) 28%, transparent);
+  color: var(--text-secondary);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.meme-token-card {
+  display: block;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-toggle-active) 32%, var(--bg-surface));
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 160ms ease, transform 140ms ease;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.meme-token-card:hover {
+  border-color: var(--border-warm);
+  transform: translateX(3px);
+}
+
+.meme-token-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meme-token-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-surface));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--accent);
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.meme-token-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  position: relative;
+  z-index: 1;
+}
+
+.meme-token-icon-fallback {
+  position: absolute;
+  z-index: 0;
+}
+
+.meme-token-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.meme-token-symbol {
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.15;
+}
+
+.meme-token-name {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meme-token-change {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  flex: 0 0 auto;
+}
+
+.meme-token-change.up { color: #1d8f54; }
+.meme-token-change.down { color: #b53333; }
+
+.meme-token-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.meme-token-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.meme-token-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.meme-token-value {
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.txn-buys { color: #1d8f54; }
+.txn-sep { color: var(--text-muted); margin: 0 2px; }
+.txn-sells { color: #b53333; }
+
+.meme-token-bar-track {
+  margin-top: 8px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #b53333 30%, var(--bg-toggle-active));
+  overflow: hidden;
+}
+
+.meme-token-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1d8f54;
 }
 
 .settings-view {
@@ -843,57 +996,6 @@ button, input { font: inherit; }
   isolation: isolate;
 }
 
-.market-pixel-haze {
-  position: absolute;
-  inset: 0;
-  border-radius: 28px;
-  pointer-events: none;
-  opacity: 0.3;
-  overflow: hidden;
-  z-index: 0;
-}
-
-.market-pixel-haze::before,
-.market-pixel-haze::after {
-  content: '';
-  position: absolute;
-  inset: -12%;
-  background-repeat: repeat;
-  image-rendering: pixelated;
-  will-change: transform, opacity;
-}
-
-.market-pixel-haze::before {
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--accent) 22%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--accent) 12%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 10%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 7%, transparent) 0 0);
-  background-size: 3px 3px, 1px 1px, 2px 2px, 1px 1px;
-  background-position: 12px 18px, 47px 31px, 29px 56px, 71px 14px;
-  opacity: 0.12;
-  animation: pixel-drift-a 26s linear infinite;
-}
-
-.market-pixel-haze::after {
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--accent) 16%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 8%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--text-primary) 5%, transparent) 0 0),
-    linear-gradient(color-mix(in srgb, var(--accent) 8%, transparent) 0 0);
-  background-size: 5px 5px, 2px 2px, 1px 1px, 3px 3px, 1px 1px;
-  background-position: 24px 22px, 63px 77px, 91px 43px, 138px 19px, 177px 68px;
-  opacity: 0.08;
-  transform: scale(1.02);
-  animation: pixel-drift-b 34s linear infinite reverse;
-}
-
-.market-shell-atmosphere > *:not(.market-pixel-haze) {
-  position: relative;
-  z-index: 1;
-}
-
 .market-board {
   --tilt-rotate-x: 0deg;
   --tilt-rotate-y: 0deg;
@@ -945,11 +1047,11 @@ button, input { font: inherit; }
 
 .market-header {
   display: grid;
-  grid-template-columns: 178px 118px 82px 168px 110px 110px 92px 84px 110px;
+  grid-template-columns: 164px 108px 76px 152px 100px 100px 84px 78px 102px;
   justify-content: start;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
-  padding: clamp(12px, 0.92vw, 15px) clamp(14px, 1vw, 18px);
+  padding: clamp(10px, 0.8vw, 13px) clamp(12px, 0.8vw, 16px);
   border-bottom: 1px solid var(--border-soft);
   color: var(--text-muted);
   font-family: var(--font-serif);
@@ -974,11 +1076,11 @@ button, input { font: inherit; }
 
 .market-row {
   display: grid;
-  grid-template-columns: 178px 118px 82px 168px 110px 110px 92px 84px 110px;
+  grid-template-columns: 164px 108px 76px 152px 100px 100px 84px 78px 102px;
   justify-content: start;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
-  padding: clamp(13px, 0.96vw, 16px) clamp(14px, 1vw, 18px);
+  padding: clamp(11px, 0.85vw, 14px) clamp(12px, 0.8vw, 16px);
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -1682,7 +1784,7 @@ button, input { font: inherit; }
 
 .right-panel {
   min-width: 0;
-  padding: clamp(16px, 1.7vw, 24px) clamp(14px, 1vw, 18px) clamp(16px, 1.7vw, 24px) clamp(8px, 0.7vw, 12px);
+  padding: clamp(10px, 1vw, 16px) clamp(10px, 0.8vw, 14px) clamp(10px, 1vw, 16px) clamp(4px, 0.4vw, 8px);
   position: relative;
   height: 100%;
   min-height: 0;
@@ -1695,8 +1797,8 @@ button, input { font: inherit; }
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px;
+  gap: 3px;
+  padding: 3px;
   background: var(--bg-toggle);
   border: 1px solid var(--border-soft);
   border-radius: 999px;
@@ -1707,11 +1809,11 @@ button, input { font: inherit; }
 .theme-chip {
   border: none;
   border-radius: 999px;
-  padding: 8px 12px;
-  min-width: 56px;
+  padding: 4px 10px;
+  min-width: 40px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -2066,16 +2168,6 @@ button, input { font: inherit; }
   100% { background-position: 0 0; }
 }
 
-@keyframes pixel-drift-a {
-  from { transform: translate3d(0, 0, 0); }
-  to { transform: translate3d(-18px, 12px, 0); }
-}
-
-@keyframes pixel-drift-b {
-  from { transform: translate3d(0, 0, 0) scale(1.02); }
-  to { transform: translate3d(16px, -10px, 0) scale(1.04); }
-}
-
 @keyframes ocr-float-in {
   from {
     opacity: 0;
@@ -2126,7 +2218,7 @@ input:focus {
 
 @media (max-width: 1480px) {
   .layout {
-    grid-template-columns: minmax(0, 1fr) clamp(320px, 24vw, 360px);
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 26vw, 380px);
   }
   .workspace-shell {
     grid-template-columns: clamp(172px, 13vw, 208px) minmax(0, 1fr);
@@ -2136,8 +2228,8 @@ input:focus {
   }
   .market-header,
   .market-row {
-    grid-template-columns: 162px 106px 74px 150px 96px 96px 84px 76px 100px;
-    gap: 10px;
+    grid-template-columns: 148px 96px 68px 134px 88px 88px 76px 70px 94px;
+    gap: 8px;
   }
   .market-timeline-list {
     max-height: none;
