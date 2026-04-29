@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 
+const TRENDING_CACHE_KEY = 'meme-trending-cache:v1'
+const TRENDING_CACHE_TTL_MS = 5 * 60 * 1000
+const TRENDING_REFRESH_MS = 60 * 1000
+
 const COPY = {
   en: {
     title: 'Token Launchpad',
@@ -9,7 +13,8 @@ const COPY = {
     twitter: 'Twitter',
     telegram: 'Telegram',
     website: 'Website',
-    image: 'Image',
+    image: 'Token Image',
+    imageHint: 'Click to upload or paste URL',
     mintWallet: 'Mint Wallet',
     signerWallet: 'Signer Wallet',
     buyAmount: 'Buy Amount',
@@ -46,7 +51,8 @@ const COPY = {
     twitter: 'Twitter',
     telegram: 'Telegram',
     website: '网站',
-    image: '图片',
+    image: '代币图片',
+    imageHint: '点击上传或粘贴 URL',
     mintWallet: 'Mint 钱包',
     signerWallet: '签名钱包',
     buyAmount: '买入数量',
@@ -77,13 +83,48 @@ const COPY = {
   },
 }
 
+function readTrendingCache() {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(TRENDING_CACHE_KEY)
+    if (!raw) return []
+    const payload = JSON.parse(raw)
+    const timestamp = Number(payload?.timestamp || 0)
+    const tokens = Array.isArray(payload?.tokens) ? payload.tokens : []
+    if (!timestamp || !tokens.length) return []
+    if ((Date.now() - timestamp) > TRENDING_CACHE_TTL_MS) return []
+    return tokens
+  } catch {
+    return []
+  }
+}
+
+function writeTrendingCache(tokens) {
+  if (typeof window === 'undefined' || !Array.isArray(tokens) || !tokens.length) return
+  try {
+    window.localStorage.setItem(
+      TRENDING_CACHE_KEY,
+      JSON.stringify({ timestamp: Date.now(), tokens }),
+    )
+  } catch {
+    // ignore cache write failures
+  }
+}
+
 export default function AgentsView({ apiBase, language }) {
   const copy = COPY[language] || COPY.en
-  const [tokens, setTokens] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [tokens, setTokens] = useState(() => readTrendingCache())
+  const [loading, setLoading] = useState(() => !readTrendingCache().length)
 
   useEffect(() => {
     let ignore = false
+    const cachedTokens = readTrendingCache()
+
+    if (cachedTokens.length) {
+      setTokens(cachedTokens)
+      setLoading(false)
+    }
+
     const load = async () => {
       try {
         const resp = await fetch(`${apiBase}/meme/trending`)
@@ -91,6 +132,7 @@ export default function AgentsView({ apiBase, language }) {
         const payload = await resp.json()
         if (!ignore && Array.isArray(payload.tokens)) {
           setTokens(payload.tokens)
+          writeTrendingCache(payload.tokens)
         }
       } catch (err) {
         console.error('Meme trending fallback', err)
@@ -99,7 +141,7 @@ export default function AgentsView({ apiBase, language }) {
       }
     }
     load()
-    const timer = window.setInterval(load, 30000)
+    const timer = window.setInterval(load, TRENDING_REFRESH_MS)
     return () => {
       ignore = true
       window.clearInterval(timer)
@@ -118,46 +160,48 @@ export default function AgentsView({ apiBase, language }) {
           </div>
 
           <section className="launch-form-card launch-form-card-compact">
+            <div className="launch-image-placeholder">
+              <div className="launch-image-drop">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10" /><path d="M8.5 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" /><path d="m21 15-5-5L5 21" /><path d="M17 3v6" /><path d="M14 6h6" /></svg>
+                <span>{copy.imageHint}</span>
+              </div>
+            </div>
             <div className="launch-form-grid">
               <label className="launch-input-group">
                 <span>{copy.name}</span>
-                <input type="text" placeholder="Jungle Spark" />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.symbol}</span>
-                <input type="text" placeholder="JSPRK" />
+                <input type="text" />
               </label>
               <label className="launch-input-group launch-input-group-wide">
                 <span>{copy.description}</span>
-                <textarea rows="3" placeholder={copy.descriptionPlaceholder} />
+                <textarea rows="3" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.twitter}</span>
-                <input type="text" placeholder="https://x.com/..." />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.telegram}</span>
-                <input type="text" placeholder="https://t.me/..." />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.website}</span>
-                <input type="text" placeholder="https://..." />
-              </label>
-              <label className="launch-input-group">
-                <span>{copy.image}</span>
-                <input type="text" placeholder={copy.imagePlaceholder} />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.mintWallet}</span>
-                <input type="text" placeholder={copy.mintPlaceholder} />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.signerWallet}</span>
-                <input type="text" placeholder={copy.signerPlaceholder} />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.buyAmount}</span>
-                <input type="text" placeholder="0.05" />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.amountMode}</span>
@@ -168,11 +212,11 @@ export default function AgentsView({ apiBase, language }) {
               </label>
               <label className="launch-input-group">
                 <span>{copy.slippage}</span>
-                <input type="text" placeholder="10" />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.priorityFee}</span>
-                <input type="text" placeholder="0.003" />
+                <input type="text" />
               </label>
               <label className="launch-input-group">
                 <span>{copy.pool}</span>

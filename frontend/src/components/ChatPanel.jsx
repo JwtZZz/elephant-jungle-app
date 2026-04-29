@@ -1,11 +1,15 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
+import ThemeToggle from './ThemeToggle'
 
 const REQUEST_TIMEOUT_MS = 90000
 
 const COPY = {
   en: {
     welcome: "Hello, I'm your Elephant Jungle assistant. What can I help you with?",
+    login: 'Login',
+    register: 'Register',
+    guest: 'Guest',
     copy: 'Copy',
     copied: 'Copied',
     retry: 'Retry',
@@ -25,6 +29,9 @@ const COPY = {
   },
   zh: {
     welcome: "Hello, I'm your Elephant Jungle assistant. 你好，请问需要什么帮助？",
+    login: 'Login',
+    register: 'Regist',
+    guest: 'Guest',
     copy: '复制',
     copied: '已复制',
     retry: '重试',
@@ -121,8 +128,12 @@ function MessageActions({ copyLabel, copiedLabel, query, onRetry, retryLabel, te
   )
 }
 
-export default function ChatPanel({ apiBase, language }) {
+export default function ChatPanel({ apiBase, theme, setTheme, language, setLanguage }) {
   const copy = COPY[language] || COPY.en
+  const [accountEmail] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return window.localStorage.getItem('elephant_account_email') || ''
+  })
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -431,7 +442,47 @@ export default function ChatPanel({ apiBase, language }) {
   }
 
   return (
-    <div className="right-panel">
+    <div className="right-col">
+      <div className="right-topbar">
+        <div className="right-topbar-left">
+          <div className="language-toggle" role="group" aria-label="Language toggle">
+            <button
+              type="button"
+              className={`language-chip ${language === 'zh' ? 'active' : ''}`}
+              onClick={() => setLanguage?.('zh')}
+            >
+              中文
+            </button>
+            <button
+              type="button"
+              className={`language-chip ${language === 'en' ? 'active' : ''}`}
+              onClick={() => setLanguage?.('en')}
+            >
+              English
+            </button>
+          </div>
+        </div>
+        <div className="right-topbar-right">
+          <ThemeToggle theme={theme} setTheme={setTheme} language={language} />
+          <div className="account-chip" role="button" tabIndex={0}>
+            <span className="account-chip-avatar" aria-hidden="true">
+              {accountEmail ? accountEmail.slice(0, 1).toUpperCase() : 'E'}
+            </span>
+            <div className="account-chip-copy">
+              {accountEmail ? (
+                <span className="account-chip-email">{accountEmail}</span>
+              ) : (
+                <div className="account-chip-actions">
+                  <span className="account-chip-action">{copy.login}</span>
+                  <span className="account-chip-divider" aria-hidden="true" />
+                  <span className="account-chip-action">{copy.register}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="right-panel">
       <div className="chat-stage">
         <div className="chat-sprite-track" ref={chatSpriteTrackRef} aria-hidden="true">
           <div className="sprite-shell facing-right" ref={chatSpriteShellRef}>
@@ -560,6 +611,7 @@ export default function ChatPanel({ apiBase, language }) {
         >
           {copy.send}
         </button>
+      </div>
       </div>
     </div>
   )

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import WorkspacePanel from './components/WorkspacePanel'
-import ThemeToggle from './components/ThemeToggle'
 import ChatPanel from './components/ChatPanel'
 import { useTheme } from './hooks/useTheme'
 import { useMarketData } from './hooks/useMarketData'
@@ -24,12 +23,7 @@ export default function App() {
           <WorkspacePanel activeView={activeView} apiBase={apiBase} marketRows={marketRows} briefs={briefs} language={language} setLanguage={setLanguage} />
         </div>
       </div>
-      <div className="right-col">
-        <div className="right-topbar">
-          <ThemeToggle theme={theme} setTheme={setTheme} language={language} />
-        </div>
-        <ChatPanel apiBase={apiBase} language={language} />
-      </div>
+      <ChatPanel apiBase={apiBase} theme={theme} setTheme={setTheme} language={language} setLanguage={setLanguage} />
     </div>
   )
 }

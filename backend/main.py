@@ -730,7 +730,35 @@ def market_timeline(
 
 
 MEME_TRENDING_CACHE: dict = {"timestamp": 0.0, "tokens": []}
-MEME_TRENDING_TTL = 30
+MEME_TRENDING_TTL = 300
+MEME_TRENDING_REDIS_KEY = "meme:trending:solana"
+MEME_BANNER_TTL = 600
+MEME_BANNER_BATCH_SIZE = 30
+MEME_BANNER_DEFAULT_LIMIT = 8
+MEME_BANNER_DEFAULT_CHAINS = ("solana", "bsc")
+MEME_BANNER_CACHE: dict[str, dict] = {}
+WHALE_FEED_TTL = 10
+WHALE_FEED_DEFAULT_LIMIT = 18
+WHALE_FEED_CACHE: dict[str, dict] = {}
+WHALE_FEED_REDIS_KEY = "whales:feed:v1"
+WHALE_FEED_SEED = [
+    {"chain": "BTC", "chainTone": "btc", "from": "BlackRock: IBIT Bitcoin ETF", "to": "Coinbase Prime Deposit", "amount": "300 BTC", "usd": "$23.28M", "direction": "outflow", "minutesAgo": 8},
+    {"chain": "BTC", "chainTone": "btc", "from": "Coinbase Prime: Custody", "to": "BlackRock: IBIT Bitcoin ETF", "amount": "300 BTC", "usd": "$23.28M", "direction": "inflow", "minutesAgo": 9},
+    {"chain": "ETH", "chainTone": "eth", "from": "BlackRock: ETHA Ethereum ETF", "to": "Coinbase Prime Deposit", "amount": "5.738K ETH", "usd": "$13.38M", "direction": "outflow", "minutesAgo": 12},
+    {"chain": "BTC", "chainTone": "btc", "from": "Fidelity: Wise Origin BTC", "to": "Coinbase Prime: Custody", "amount": "187 BTC", "usd": "$14.51M", "direction": "inflow", "minutesAgo": 16},
+    {"chain": "SOL", "chainTone": "sol", "from": "Wintermute Market Making", "to": "Binance Hot Wallet 12", "amount": "92.4K SOL", "usd": "$12.07M", "direction": "inflow", "minutesAgo": 18},
+    {"chain": "USDT", "chainTone": "usdt", "from": "Tether Treasury", "to": "Cumberland DRW", "amount": "20.0M USDT", "usd": "$20.00M", "direction": "inflow", "minutesAgo": 21},
+    {"chain": "BTC", "chainTone": "btc", "from": "Grayscale: GBTC ETF", "to": "Coinbase Prime Deposit (+2)", "amount": "141 BTC", "usd": "$10.93M", "direction": "outflow", "minutesAgo": 24},
+    {"chain": "ETH", "chainTone": "eth", "from": "Jump Trading 0x9c1", "to": "Kraken Deposit Wallet", "amount": "3.904K ETH", "usd": "$9.08M", "direction": "outflow", "minutesAgo": 27},
+    {"chain": "BNB", "chainTone": "bnb", "from": "Binance Cold Wallet 3", "to": "Wintermute BSC Router", "amount": "14.2K BNB", "usd": "$8.81M", "direction": "outflow", "minutesAgo": 31},
+    {"chain": "BTC", "chainTone": "btc", "from": "Ark/21Shares ARKB", "to": "Coinbase Prime: Custody", "amount": "119 BTC", "usd": "$9.19M", "direction": "inflow", "minutesAgo": 35},
+    {"chain": "USDC", "chainTone": "usdc", "from": "Circle Treasury", "to": "Coinbase Institutional", "amount": "15.0M USDC", "usd": "$15.00M", "direction": "inflow", "minutesAgo": 39},
+    {"chain": "ETH", "chainTone": "eth", "from": "Coinbase Prime: Custody", "to": "BlackRock: ETHA Ethereum ETF", "amount": "2.865K ETH", "usd": "$6.71M", "direction": "inflow", "minutesAgo": 43},
+    {"chain": "SOL", "chainTone": "sol", "from": "FalconX Prime", "to": "OKX Solana Deposit", "amount": "48.0K SOL", "usd": "$6.18M", "direction": "outflow", "minutesAgo": 47},
+    {"chain": "BTC", "chainTone": "btc", "from": "Bitwise ETF Reserve", "to": "Coinbase Prime Deposit", "amount": "78 BTC", "usd": "$6.04M", "direction": "outflow", "minutesAgo": 52},
+    {"chain": "USDT", "chainTone": "usdt", "from": "Alameda Recovery Wallet", "to": "Binance Deposit Wallet", "amount": "12.5M USDT", "usd": "$12.50M", "direction": "outflow", "minutesAgo": 56},
+    {"chain": "BNB", "chainTone": "bnb", "from": "Jump Cross-chain Treasury", "to": "Binance Hot Wallet 7", "amount": "8.4K BNB", "usd": "$5.22M", "direction": "inflow", "minutesAgo": 61},
+]
 
 
 def _format_meme_price(value: float | None) -> str:
@@ -743,96 +771,306 @@ def _format_meme_price(value: float | None) -> str:
     return f"${value:,.8f}"
 
 
+def _format_meme_money(value: float | None) -> str:
+    if value is None:
+        return "--"
+    amount = float(value or 0.0)
+    if amount >= 1_000_000_000:
+        return f"${amount / 1_000_000_000:.2f}B"
+    if amount >= 1_000_000:
+        return f"${amount / 1_000_000:.2f}M"
+    if amount >= 1_000:
+        return f"${amount / 1_000:.1f}K"
+    if amount >= 1:
+        return f"${amount:,.0f}"
+    return f"${amount:.4f}"
+
+
+def _normalize_meme_chain(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    mapping = {
+        "sol": "solana",
+        "solana": "solana",
+        "bsc": "bsc",
+        "bnb": "bsc",
+        "bnbchain": "bsc",
+        "binance": "bsc",
+        "binance-smart-chain": "bsc",
+    }
+    return mapping.get(normalized, "")
+
+
+def _meme_chain_label(chain_id: str) -> str:
+    return {"solana": "SOL", "bsc": "BNB"}.get(chain_id, chain_id.upper())
+
+
+def _chunked(values: list[str], size: int) -> list[list[str]]:
+    return [values[index:index + size] for index in range(0, len(values), size)]
+
+
+def _meme_banner_cache_key(chains: list[str], limit: int) -> str:
+    return f"meme:banner:{','.join(sorted(chains))}:{limit}"
+
+
+def _meme_banner_score(pair: dict, boost_item: dict | None) -> float:
+    txns = (pair.get("txns") or {}).get("h6") or {}
+    volume = (pair.get("volume") or {}).get("h6") or 0
+    liquidity = ((pair.get("liquidity") or {}).get("usd")) or 0
+    price_change = (pair.get("priceChange") or {}).get("h6") or 0
+    boosts = (pair.get("boosts") or {}).get("active") or 0
+    extra_boost = (boost_item or {}).get("amount") or 0
+    total_txns = int(txns.get("buys", 0) or 0) + int(txns.get("sells", 0) or 0)
+    return (
+        total_txns * 1.8
+        + float(volume or 0) / 800
+        + float(liquidity or 0) / 6000
+        + max(float(price_change or 0), 0.0) * 0.8
+        + float(boosts or 0) * 5
+        + float(extra_boost or 0) * 0.02
+    )
+
+
+def fetch_whale_feed(limit: int = WHALE_FEED_DEFAULT_LIMIT) -> list[dict]:
+    normalized_limit = max(8, min(int(limit or WHALE_FEED_DEFAULT_LIMIT), 24))
+    cache_key = f"{WHALE_FEED_REDIS_KEY}:{normalized_limit}"
+    now = time.time()
+
+    redis_cached = cache_get_json(cache_key)
+    if isinstance(redis_cached, list) and redis_cached:
+        WHALE_FEED_CACHE[cache_key] = {"timestamp": now, "items": redis_cached}
+        return list(redis_cached)
+
+    local_cached = WHALE_FEED_CACHE.get(cache_key) or {}
+    if local_cached.get("items") and (now - float(local_cached.get("timestamp", 0.0))) < WHALE_FEED_TTL:
+        return list(local_cached["items"])
+
+    offset = int(now // WHALE_FEED_TTL) % len(WHALE_FEED_SEED)
+    ordered = WHALE_FEED_SEED[offset:] + WHALE_FEED_SEED[:offset]
+    items = ordered[:normalized_limit]
+
+    WHALE_FEED_CACHE[cache_key] = {"timestamp": now, "items": items}
+    try:
+        cache_set_json(cache_key, items, WHALE_FEED_TTL)
+    except Exception:
+        pass
+    return list(items)
+
+
+def fetch_meme_banner(chains: list[str] | None = None, limit: int = MEME_BANNER_DEFAULT_LIMIT) -> list[dict]:
+    normalized_chains = [_normalize_meme_chain(item) for item in (chains or MEME_BANNER_DEFAULT_CHAINS)]
+    normalized_chains = [item for item in normalized_chains if item]
+    if not normalized_chains:
+        normalized_chains = list(MEME_BANNER_DEFAULT_CHAINS)
+    normalized_chains = list(dict.fromkeys(normalized_chains))
+    normalized_limit = max(3, min(int(limit or MEME_BANNER_DEFAULT_LIMIT), 12))
+    cache_key = _meme_banner_cache_key(normalized_chains, normalized_limit)
+    now = time.time()
+
+    redis_cached = cache_get_json(cache_key)
+    if isinstance(redis_cached, list) and redis_cached:
+        MEME_BANNER_CACHE[cache_key] = {"timestamp": now, "items": redis_cached}
+        return list(redis_cached)
+
+    local_cached = MEME_BANNER_CACHE.get(cache_key) or {}
+    if local_cached.get("items") and (now - float(local_cached.get("timestamp", 0.0))) < MEME_BANNER_TTL:
+        return list(local_cached["items"])
+
+    try:
+        items: list[dict] = []
+        boost_meta_by_chain: dict[str, dict[str, dict]] = {chain: {} for chain in normalized_chains}
+        headers = {"User-Agent": "Mozilla/5.0"}
+
+        with httpx.Client(timeout=25.0, follow_redirects=True, headers=headers) as client:
+            boost_resp = client.get("https://api.dexscreener.com/token-boosts/latest/v1")
+            boost_resp.raise_for_status()
+            boosts = boost_resp.json()
+            if not isinstance(boosts, list):
+                boosts = []
+
+            for item in boosts:
+                chain_id = _normalize_meme_chain(item.get("chainId") or "")
+                if chain_id not in normalized_chains:
+                    continue
+                address = (item.get("tokenAddress") or "").strip()
+                if not address:
+                    continue
+                boost_meta_by_chain[chain_id].setdefault(address, item)
+
+            for chain_id in normalized_chains:
+                addresses = list(boost_meta_by_chain[chain_id].keys())[:24]
+                if not addresses:
+                    continue
+
+                best_pairs: dict[str, dict] = {}
+                for batch in _chunked(addresses, MEME_BANNER_BATCH_SIZE):
+                    pair_resp = client.get(f"https://api.dexscreener.com/tokens/v1/{chain_id}/{','.join(batch)}")
+                    pair_resp.raise_for_status()
+                    pairs = pair_resp.json()
+                    if not isinstance(pairs, list):
+                        continue
+                    for pair in pairs:
+                        base = pair.get("baseToken") or {}
+                        address = (base.get("address") or "").strip()
+                        if not address or address not in boost_meta_by_chain[chain_id]:
+                            continue
+                        existing = best_pairs.get(address)
+                        existing_score = _meme_banner_score(existing, boost_meta_by_chain[chain_id][address]) if existing else -1
+                        next_score = _meme_banner_score(pair, boost_meta_by_chain[chain_id][address])
+                        if next_score > existing_score:
+                            best_pairs[address] = pair
+
+                for address, pair in best_pairs.items():
+                    boost_item = boost_meta_by_chain[chain_id].get(address) or {}
+                    base = pair.get("baseToken") or {}
+                    info = pair.get("info") or {}
+                    txns_h6 = (pair.get("txns") or {}).get("h6") or {}
+                    volume_h6 = (pair.get("volume") or {}).get("h6") or 0
+                    price_change_h6 = (pair.get("priceChange") or {}).get("h6") or 0
+                    liquidity_usd = ((pair.get("liquidity") or {}).get("usd")) or 0
+                    market_cap = pair.get("marketCap") or pair.get("fdv") or 0
+                    buys = int(txns_h6.get("buys", 0) or 0)
+                    sells = int(txns_h6.get("sells", 0) or 0)
+                    total_txns = buys + sells
+
+                    items.append({
+                        "chain": chain_id,
+                        "chainLabel": _meme_chain_label(chain_id),
+                        "symbol": base.get("symbol") or address[:6],
+                        "name": base.get("name") or (boost_item.get("description") or "")[:24],
+                        "icon": (info.get("imageUrl") or boost_item.get("icon") or "").strip(),
+                        "url": (pair.get("url") or boost_item.get("url") or f"https://dexscreener.com/{chain_id}/{address}").strip(),
+                        "price": _format_meme_price(float(pair.get("priceUsd") or 0)),
+                        "change6h": round(float(price_change_h6 or 0), 2),
+                        "volume6h": _format_meme_money(float(volume_h6 or 0)),
+                        "liquidity": _format_meme_money(float(liquidity_usd or 0)),
+                        "marketCap": _format_meme_money(float(market_cap or 0)),
+                        "buys6h": buys,
+                        "sells6h": sells,
+                        "txns6h": total_txns,
+                        "score": _meme_banner_score(pair, boost_item),
+                    })
+    except Exception:
+        if local_cached.get("items"):
+            return list(local_cached["items"])
+        if isinstance(redis_cached, list) and redis_cached:
+            return list(redis_cached)
+        raise
+
+    ranked_items = sorted(items, key=lambda item: item.get("score", 0), reverse=True)[:normalized_limit]
+    for item in ranked_items:
+        item.pop("score", None)
+
+    MEME_BANNER_CACHE[cache_key] = {"timestamp": now, "items": ranked_items}
+    if ranked_items:
+        cache_set_json(cache_key, ranked_items, MEME_BANNER_TTL)
+    return ranked_items
+
+
 def fetch_meme_trending() -> list[dict]:
     now = time.time()
+    redis_cached = cache_get_json(MEME_TRENDING_REDIS_KEY)
+    if isinstance(redis_cached, list) and redis_cached:
+        MEME_TRENDING_CACHE["timestamp"] = now
+        MEME_TRENDING_CACHE["tokens"] = redis_cached
+        return list(redis_cached)
+
     if MEME_TRENDING_CACHE["tokens"] and (now - MEME_TRENDING_CACHE["timestamp"]) < MEME_TRENDING_TTL:
         return list(MEME_TRENDING_CACHE["tokens"])
 
     tokens: list[dict] = []
-    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-        boost_resp = client.get(
-            "https://api.dexscreener.com/token-boosts/latest/v1?chainId=solana&limit=30"
-        )
-        boost_resp.raise_for_status()
-        boosts = boost_resp.json()
-        if not isinstance(boosts, list):
-            return tokens
+    try:
+        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            boost_resp = client.get(
+                "https://api.dexscreener.com/token-boosts/latest/v1?chainId=solana&limit=30"
+            )
+            boost_resp.raise_for_status()
+            boosts = boost_resp.json()
+            if not isinstance(boosts, list):
+                return tokens
 
-        seen: set[str] = set()
-        for item in boosts:
-            address = (item.get("tokenAddress") or "").strip()
-            if not address or address in seen or address.startswith("0x"):
-                continue
-            seen.add(address)
-
-            symbol = ""
-            name = ""
-            price_usd = None
-            volume_h24 = None
-            price_change_h24 = None
-            txns_h24_buys = 0
-            txns_h24_sells = 0
-            icon_url = ""
-
-            try:
-                pair_resp = client.get(
-                    f"https://api.dexscreener.com/latest/dex/tokens/{address}"
-                )
-                pair_resp.raise_for_status()
-                pair_data = pair_resp.json()
-                pairs = pair_data.get("pairs") or []
-                if pairs:
-                    pair = pairs[0]
-                    base = pair.get("baseToken") or {}
-                    symbol = base.get("symbol", "")
-                    name = base.get("name", "")
-                    price_usd = float(pair.get("priceUsd", 0) or 0)
-                    vol = pair.get("volume") or {}
-                    volume_h24 = float(vol.get("h24", 0) or 0)
-                    price_change = pair.get("priceChange") or {}
-                    price_change_h24 = float(price_change.get("h24", 0) or 0)
-                    txns = pair.get("txns") or {}
-                    h24 = txns.get("h24") or {}
-                    txns_h24_buys = int(h24.get("buys", 0) or 0)
-                    txns_h24_sells = int(h24.get("sells", 0) or 0)
-            except Exception:
-                pass
-
-            description = (item.get("description") or "").strip()
-            icon_url = item.get("icon", "")
-            header_url = item.get("header", "")
-            token_url = item.get("url", f"https://dexscreener.com/solana/{address}")
-            links = item.get("links") or []
-            twitter_url = ""
-            website_url = ""
-            for link in links:
-                link_url = (link.get("url") or "").strip()
-                if not link_url:
+            seen: set[str] = set()
+            for item in boosts:
+                address = (item.get("tokenAddress") or "").strip()
+                if not address or address in seen or address.startswith("0x"):
                     continue
-                if link.get("type") == "twitter" or "x.com" in link_url:
-                    twitter_url = link_url
-                elif not website_url:
-                    website_url = link_url
+                seen.add(address)
 
-            tokens.append({
-                "symbol": symbol or address[:6],
-                "name": name or description[:30],
-                "address": address,
-                "price": _format_meme_price(price_usd),
-                "volume24h": f"${volume_h24:,.0f}" if volume_h24 else "--",
-                "change24h": round(price_change_h24, 2) if price_change_h24 else 0,
-                "buys24h": txns_h24_buys,
-                "sells24h": txns_h24_sells,
-                "description": description,
-                "icon": icon_url,
-                "header": header_url,
-                "url": token_url,
-                "twitter": twitter_url,
-                "website": website_url,
-            })
+                symbol = ""
+                name = ""
+                price_usd = None
+                volume_h24 = None
+                price_change_h24 = None
+                txns_h24_buys = 0
+                txns_h24_sells = 0
+                icon_url = ""
+
+                try:
+                    pair_resp = client.get(
+                        f"https://api.dexscreener.com/latest/dex/tokens/{address}"
+                    )
+                    pair_resp.raise_for_status()
+                    pair_data = pair_resp.json()
+                    pairs = pair_data.get("pairs") or []
+                    if pairs:
+                        pair = pairs[0]
+                        base = pair.get("baseToken") or {}
+                        symbol = base.get("symbol", "")
+                        name = base.get("name", "")
+                        price_usd = float(pair.get("priceUsd", 0) or 0)
+                        vol = pair.get("volume") or {}
+                        volume_h24 = float(vol.get("h24", 0) or 0)
+                        price_change = pair.get("priceChange") or {}
+                        price_change_h24 = float(price_change.get("h24", 0) or 0)
+                        txns = pair.get("txns") or {}
+                        h24 = txns.get("h24") or {}
+                        txns_h24_buys = int(h24.get("buys", 0) or 0)
+                        txns_h24_sells = int(h24.get("sells", 0) or 0)
+                except Exception:
+                    pass
+
+                description = (item.get("description") or "").strip()
+                icon_url = item.get("icon", "")
+                header_url = item.get("header", "")
+                token_url = item.get("url", f"https://dexscreener.com/solana/{address}")
+                links = item.get("links") or []
+                twitter_url = ""
+                website_url = ""
+                for link in links:
+                    link_url = (link.get("url") or "").strip()
+                    if not link_url:
+                        continue
+                    if link.get("type") == "twitter" or "x.com" in link_url:
+                        twitter_url = link_url
+                    elif not website_url:
+                        website_url = link_url
+
+                tokens.append({
+                    "symbol": symbol or address[:6],
+                    "name": name or description[:30],
+                    "address": address,
+                    "price": _format_meme_price(price_usd),
+                    "volume24h": f"${volume_h24:,.0f}" if volume_h24 else "--",
+                    "change24h": round(price_change_h24, 2) if price_change_h24 else 0,
+                    "buys24h": txns_h24_buys,
+                    "sells24h": txns_h24_sells,
+                    "description": description,
+                    "icon": icon_url,
+                    "header": header_url,
+                    "url": token_url,
+                    "twitter": twitter_url,
+                    "website": website_url,
+                })
+    except Exception:
+        if MEME_TRENDING_CACHE["tokens"]:
+            return list(MEME_TRENDING_CACHE["tokens"])
+        if isinstance(redis_cached, list) and redis_cached:
+            return list(redis_cached)
+        raise
 
     MEME_TRENDING_CACHE["timestamp"] = now
     MEME_TRENDING_CACHE["tokens"] = tokens
+    if tokens:
+        cache_set_json(MEME_TRENDING_REDIS_KEY, tokens, MEME_TRENDING_TTL)
     return tokens
 
 
@@ -840,5 +1078,26 @@ def fetch_meme_trending() -> list[dict]:
 def meme_trending() -> dict:
     try:
         return {"tokens": fetch_meme_trending()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/whales/feed")
+def whale_feed(limit: int = Query(WHALE_FEED_DEFAULT_LIMIT, ge=8, le=24)) -> dict:
+    try:
+        items = fetch_whale_feed(limit=limit)
+        return {"items": items}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/meme/banner")
+def meme_banner(
+    chains: str = Query("solana,bsc", min_length=3, max_length=64),
+    limit: int = Query(MEME_BANNER_DEFAULT_LIMIT, ge=3, le=12),
+) -> dict:
+    try:
+        chain_items = [item.strip() for item in chains.split(",") if item.strip()]
+        return {"items": fetch_meme_banner(chains=chain_items, limit=limit)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
