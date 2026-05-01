@@ -4,8 +4,6 @@ import MarketBoard from './MarketBoard'
 const DETAIL_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
 const MEME_BANNER_CACHE_KEY = 'meme-banner-cache:v1'
 const MEME_BANNER_CACHE_TTL_MS = 10 * 60 * 1000
-const WHALE_FEED_CACHE_KEY = 'whale-feed-cache:v1'
-const WHALE_FEED_CACHE_TTL_MS = 10 * 1000
 
 const COPY = {
   en: {
@@ -61,12 +59,6 @@ const COPY = {
     hotVolume: '6H Vol',
     hotTxns: '6H Txns',
     hotCap: 'Mkt Cap',
-    whaleTitle: 'Whale Watch',
-    whaleCopy: 'Tracking high-signal treasury and ETF flows before we wire live monitoring.',
-    whaleTime: '6 hours ago',
-    whaleAsset: 'Asset',
-    whaleValue: 'Value',
-    whaleMove: 'Direction',
   },
   zh: {
     back: '返回市场',
@@ -121,12 +113,6 @@ const COPY = {
     hotVolume: '6H 量',
     hotTxns: '6H 交易',
     hotCap: '市值',
-    whaleTitle: '鲸鱼监控',
-    whaleCopy: '先把高信号的大户与 ETF 资金动向放进主页，后面再接实时监控。',
-    whaleTime: '6 小时前',
-    whaleAsset: '资产',
-    whaleValue: '金额',
-    whaleMove: '方向',
   },
 }
 
@@ -233,34 +219,6 @@ function writeMemeBannerCache(items) {
   try {
     window.localStorage.setItem(
       MEME_BANNER_CACHE_KEY,
-      JSON.stringify({ timestamp: Date.now(), items }),
-    )
-  } catch {
-    // ignore cache write failures
-  }
-}
-
-function readWhaleFeedCache() {
-  if (typeof window === 'undefined') return []
-  try {
-    const raw = window.localStorage.getItem(WHALE_FEED_CACHE_KEY)
-    if (!raw) return []
-    const payload = JSON.parse(raw)
-    const timestamp = Number(payload?.timestamp || 0)
-    const items = Array.isArray(payload?.items) ? payload.items : []
-    if (!timestamp || !items.length) return []
-    if ((Date.now() - timestamp) > WHALE_FEED_CACHE_TTL_MS) return []
-    return items
-  } catch {
-    return []
-  }
-}
-
-function writeWhaleFeedCache(items) {
-  if (typeof window === 'undefined' || !Array.isArray(items) || !items.length) return
-  try {
-    window.localStorage.setItem(
-      WHALE_FEED_CACHE_KEY,
       JSON.stringify({ timestamp: Date.now(), items }),
     )
   } catch {
@@ -501,6 +459,10 @@ function TimelinePanel({ apiBase, coin, copy, language }) {
 function MemeBannerPanel({ apiBase, copy }) {
   const [items, setItems] = useState(() => readMemeBannerCache())
   const [loading, setLoading] = useState(() => !readMemeBannerCache().length)
+  const marqueeBaseItems = items.length
+    ? Array.from({ length: Math.max(2, Math.ceil(14 / items.length)) }, () => items).flat()
+    : []
+  const marqueeItems = marqueeBaseItems.length ? [...marqueeBaseItems, ...marqueeBaseItems] : []
 
   useEffect(() => {
     let ignore = false
@@ -538,121 +500,57 @@ function MemeBannerPanel({ apiBase, copy }) {
       <div className="market-meme-list">
         {loading ? <div className="market-meme-empty">Loading banner...</div> : null}
         {!loading && !items.length ? <div className="market-meme-empty">No meme data.</div> : null}
-        {items.map((item) => {
-          const up = Number(item.change6h) >= 0
-          return (
-            <a className="market-meme-card" href={item.url} target="_blank" rel="noreferrer" key={`${item.chain}-${item.symbol}`}>
-              <div className="market-meme-card-top">
-                <span className="market-meme-icon">
-                  {item.icon ? <img src={item.icon} alt={item.symbol} /> : <span>{item.symbol?.slice(0, 2)}</span>}
-                </span>
-                <div className="market-meme-main">
-                  <div className="market-meme-symbol-row">
-                    <strong>{item.symbol}</strong>
-                    <span className={`market-meme-change ${up ? 'up' : 'down'}`}>
-                      {up ? '+' : ''}{Number(item.change6h || 0).toFixed(2)}%
-                    </span>
-                  </div>
-                  <div className="market-meme-name-row">
-                    <span>{item.name}</span>
-                    <span className="market-meme-chain">{item.chainLabel}</span>
-                  </div>
-                </div>
-              </div>
+        {!!items.length ? (
+          <div className="market-meme-marquee">
+            <div className="market-meme-track">
+              {marqueeItems.map((item, index) => {
+                const up = Number(item.change6h) >= 0
+                return (
+                  <a className="market-meme-card" href={item.url} target="_blank" rel="noreferrer" key={`${item.chain}-${item.symbol}-${index}`}>
+                    <div className="market-meme-card-top">
+                      <span className="market-meme-icon">
+                        {item.icon ? <img src={item.icon} alt={item.symbol} /> : <span>{item.symbol?.slice(0, 2)}</span>}
+                      </span>
+                      <div className="market-meme-main">
+                        <div className="market-meme-symbol-row">
+                          <strong>{item.symbol}</strong>
+                          <span className={`market-meme-change ${up ? 'up' : 'down'}`}>
+                            {up ? '+' : ''}{Number(item.change6h || 0).toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="market-meme-name-row">
+                          <span>{item.name}</span>
+                          <span className="market-meme-chain">{item.chainLabel}</span>
+                        </div>
+                      </div>
+                    </div>
 
-              <div className="market-meme-stats">
-                <div className="market-meme-stat">
-                  <span>{copy.price}</span>
-                  <strong>{item.price}</strong>
-                </div>
-                <div className="market-meme-stat">
-                  <span>{copy.hotVolume}</span>
-                  <strong>{item.volume6h}</strong>
-                </div>
-                <div className="market-meme-stat">
-                  <span>{copy.hotTxns}</span>
-                  <strong>{item.txns6h}</strong>
-                </div>
-                <div className="market-meme-stat">
-                  <span>{copy.hotCap}</span>
-                  <strong>{item.marketCap}</strong>
-                </div>
-              </div>
-            </a>
-          )
-        })}
+                    <div className="market-meme-stats">
+                      <div className="market-meme-stat">
+                        <span>{copy.price}</span>
+                        <strong>{item.price}</strong>
+                      </div>
+                      <div className="market-meme-stat">
+                        <span>{copy.hotVolume}</span>
+                        <strong>{item.volume6h}</strong>
+                      </div>
+                      <div className="market-meme-stat">
+                        <span>{copy.hotTxns}</span>
+                        <strong>{item.txns6h}</strong>
+                      </div>
+                      <div className="market-meme-stat">
+                        <span>{copy.hotCap}</span>
+                        <strong>{item.marketCap}</strong>
+                      </div>
+                    </div>
+                  </a>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
       </div>
     </aside>
-  )
-}
-
-function WhaleWatchPreview({ copy }) {
-  const [items, setItems] = useState(() => readWhaleFeedCache())
-  const [loading, setLoading] = useState(() => !readWhaleFeedCache().length)
-
-  useEffect(() => {
-    let ignore = false
-    const cached = readWhaleFeedCache()
-    if (cached.length) {
-      setItems(cached)
-      setLoading(false)
-    }
-
-    const load = async () => {
-      try {
-        const response = await fetch('/whales/feed?limit=18')
-        if (!response.ok) throw new Error(`whales feed failed (${response.status})`)
-        const payload = await response.json()
-        const nextItems = Array.isArray(payload.items) ? payload.items : []
-        if (!ignore && nextItems.length) {
-          setItems(nextItems)
-          writeWhaleFeedCache(nextItems)
-        }
-      } catch (error) {
-        console.error('Whale feed fallback', error)
-      } finally {
-        if (!ignore) setLoading(false)
-      }
-    }
-
-    load()
-    const timer = window.setInterval(load, 5000)
-    return () => {
-      ignore = true
-      window.clearInterval(timer)
-    }
-  }, [])
-
-  return (
-    <section className="whale-watch-panel">
-      <div className="whale-watch-head">
-        <div>
-          <div className="market-news-kicker">{copy.whaleTitle}</div>
-          <div className="whale-watch-copy">{copy.whaleCopy}</div>
-        </div>
-      </div>
-
-      <div className="whale-watch-list">
-        {loading ? <div className="market-meme-empty">Loading whale flows...</div> : null}
-        {!loading && !items.length ? <div className="market-meme-empty">No whale flows yet.</div> : null}
-        {items.map((item, index) => {
-          const inbound = item.direction === 'inflow'
-          return (
-            <article className="whale-watch-row" key={`${item.chain}-${item.from}-${index}`}>
-              <div className={`whale-watch-chain ${item.chainTone}`}>{item.chain}</div>
-              <div className="whale-watch-time">{item.minutesAgo ? `${item.minutesAgo}m` : copy.whaleTime}</div>
-              <div className="whale-watch-route">
-                <span className="whale-watch-entity">{item.from}</span>
-                <span className="whale-watch-arrow">{inbound ? '->' : '<-'}</span>
-                <span className="whale-watch-entity">{item.to}</span>
-              </div>
-              <div className={`whale-watch-amount ${inbound ? 'up' : 'down'}`}>{item.amount}</div>
-              <div className="whale-watch-value">{item.usd}</div>
-            </article>
-          )
-        })}
-      </div>
-    </section>
   )
 }
 
@@ -947,7 +845,6 @@ export default function MarketsView({ apiBase, marketRows, briefs, language }) {
           <div className="market-home-hero">
             <div className="market-home-main">
               <MarketBoard rows={marketRows} language={language} onSelectCoin={(coin) => setSelectedCoin(coin)} />
-              <WhaleWatchPreview copy={copy} />
             </div>
             <MemeBannerPanel apiBase={apiBase} copy={copy} />
           </div>

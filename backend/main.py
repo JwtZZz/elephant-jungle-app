@@ -738,26 +738,26 @@ MEME_BANNER_DEFAULT_LIMIT = 8
 MEME_BANNER_DEFAULT_CHAINS = ("solana", "bsc")
 MEME_BANNER_CACHE: dict[str, dict] = {}
 WHALE_FEED_TTL = 10
-WHALE_FEED_DEFAULT_LIMIT = 18
+WHALE_FEED_DEFAULT_LIMIT = 24
 WHALE_FEED_CACHE: dict[str, dict] = {}
 WHALE_FEED_REDIS_KEY = "whales:feed:v1"
 WHALE_FEED_SEED = [
-    {"chain": "BTC", "chainTone": "btc", "from": "BlackRock: IBIT Bitcoin ETF", "to": "Coinbase Prime Deposit", "amount": "300 BTC", "usd": "$23.28M", "direction": "outflow", "minutesAgo": 8},
-    {"chain": "BTC", "chainTone": "btc", "from": "Coinbase Prime: Custody", "to": "BlackRock: IBIT Bitcoin ETF", "amount": "300 BTC", "usd": "$23.28M", "direction": "inflow", "minutesAgo": 9},
-    {"chain": "ETH", "chainTone": "eth", "from": "BlackRock: ETHA Ethereum ETF", "to": "Coinbase Prime Deposit", "amount": "5.738K ETH", "usd": "$13.38M", "direction": "outflow", "minutesAgo": 12},
-    {"chain": "BTC", "chainTone": "btc", "from": "Fidelity: Wise Origin BTC", "to": "Coinbase Prime: Custody", "amount": "187 BTC", "usd": "$14.51M", "direction": "inflow", "minutesAgo": 16},
-    {"chain": "SOL", "chainTone": "sol", "from": "Wintermute Market Making", "to": "Binance Hot Wallet 12", "amount": "92.4K SOL", "usd": "$12.07M", "direction": "inflow", "minutesAgo": 18},
-    {"chain": "USDT", "chainTone": "usdt", "from": "Tether Treasury", "to": "Cumberland DRW", "amount": "20.0M USDT", "usd": "$20.00M", "direction": "inflow", "minutesAgo": 21},
-    {"chain": "BTC", "chainTone": "btc", "from": "Grayscale: GBTC ETF", "to": "Coinbase Prime Deposit (+2)", "amount": "141 BTC", "usd": "$10.93M", "direction": "outflow", "minutesAgo": 24},
-    {"chain": "ETH", "chainTone": "eth", "from": "Jump Trading 0x9c1", "to": "Kraken Deposit Wallet", "amount": "3.904K ETH", "usd": "$9.08M", "direction": "outflow", "minutesAgo": 27},
-    {"chain": "BNB", "chainTone": "bnb", "from": "Binance Cold Wallet 3", "to": "Wintermute BSC Router", "amount": "14.2K BNB", "usd": "$8.81M", "direction": "outflow", "minutesAgo": 31},
-    {"chain": "BTC", "chainTone": "btc", "from": "Ark/21Shares ARKB", "to": "Coinbase Prime: Custody", "amount": "119 BTC", "usd": "$9.19M", "direction": "inflow", "minutesAgo": 35},
-    {"chain": "USDC", "chainTone": "usdc", "from": "Circle Treasury", "to": "Coinbase Institutional", "amount": "15.0M USDC", "usd": "$15.00M", "direction": "inflow", "minutesAgo": 39},
-    {"chain": "ETH", "chainTone": "eth", "from": "Coinbase Prime: Custody", "to": "BlackRock: ETHA Ethereum ETF", "amount": "2.865K ETH", "usd": "$6.71M", "direction": "inflow", "minutesAgo": 43},
-    {"chain": "SOL", "chainTone": "sol", "from": "FalconX Prime", "to": "OKX Solana Deposit", "amount": "48.0K SOL", "usd": "$6.18M", "direction": "outflow", "minutesAgo": 47},
-    {"chain": "BTC", "chainTone": "btc", "from": "Bitwise ETF Reserve", "to": "Coinbase Prime Deposit", "amount": "78 BTC", "usd": "$6.04M", "direction": "outflow", "minutesAgo": 52},
-    {"chain": "USDT", "chainTone": "usdt", "from": "Alameda Recovery Wallet", "to": "Binance Deposit Wallet", "amount": "12.5M USDT", "usd": "$12.50M", "direction": "outflow", "minutesAgo": 56},
-    {"chain": "BNB", "chainTone": "bnb", "from": "Jump Cross-chain Treasury", "to": "Binance Hot Wallet 7", "amount": "8.4K BNB", "usd": "$5.22M", "direction": "inflow", "minutesAgo": 61},
+    {"chain": "BTC", "chainTone": "btc", "from": "BlackRock: IBIT Bitcoin ETF", "fromAddress": "bc1q9xj...7qk2", "to": "Coinbase Prime Deposit", "toAddress": "3QJmV3...eMcz", "amount": "300 BTC", "usd": "$23.28M", "direction": "outflow", "minutesAgo": 8},
+    {"chain": "BTC", "chainTone": "btc", "from": "Coinbase Prime: Custody", "fromAddress": "bc1qcp...8v4h", "to": "BlackRock: IBIT Bitcoin ETF", "toAddress": "bc1qa8...0nkp", "amount": "300 BTC", "usd": "$23.28M", "direction": "inflow", "minutesAgo": 9},
+    {"chain": "ETH", "chainTone": "eth", "from": "BlackRock: ETHA Ethereum ETF", "fromAddress": "0x3a8F...41cE", "to": "Coinbase Prime Deposit", "toAddress": "0x6F2b...9D11", "amount": "5.738K ETH", "usd": "$13.38M", "direction": "outflow", "minutesAgo": 12},
+    {"chain": "BTC", "chainTone": "btc", "from": "Fidelity: Wise Origin BTC", "fromAddress": "bc1qm0...2pp7", "to": "Coinbase Prime: Custody", "toAddress": "bc1qcp...8v4h", "amount": "187 BTC", "usd": "$14.51M", "direction": "inflow", "minutesAgo": 16},
+    {"chain": "SOL", "chainTone": "sol", "from": "Wintermute Market Making", "fromAddress": "6pQ9g...Lh9Qz", "to": "Binance Hot Wallet 12", "toAddress": "8f3K2...p2MdX", "amount": "92.4K SOL", "usd": "$12.07M", "direction": "inflow", "minutesAgo": 18},
+    {"chain": "USDT", "chainTone": "usdt", "from": "Tether Treasury", "fromAddress": "TX7uK...4sE91", "to": "Cumberland DRW", "toAddress": "TG1oL...K0fw3", "amount": "20.0M USDT", "usd": "$20.00M", "direction": "inflow", "minutesAgo": 21},
+    {"chain": "BTC", "chainTone": "btc", "from": "Grayscale: GBTC ETF", "fromAddress": "bc1qgl...9ut2", "to": "Coinbase Prime Deposit (+2)", "toAddress": "1BoatS...tpyT", "amount": "141 BTC", "usd": "$10.93M", "direction": "outflow", "minutesAgo": 24},
+    {"chain": "ETH", "chainTone": "eth", "from": "Jump Trading 0x9c1", "fromAddress": "0x9c12...5a1B", "to": "Kraken Deposit Wallet", "toAddress": "0x72d4...aC33", "amount": "3.904K ETH", "usd": "$9.08M", "direction": "outflow", "minutesAgo": 27},
+    {"chain": "BNB", "chainTone": "bnb", "from": "Binance Cold Wallet 3", "fromAddress": "0xb6A7...821d", "to": "Wintermute BSC Router", "toAddress": "0xA181...a12C", "amount": "14.2K BNB", "usd": "$8.81M", "direction": "outflow", "minutesAgo": 31},
+    {"chain": "BTC", "chainTone": "btc", "from": "Ark/21Shares ARKB", "fromAddress": "bc1qzk...6c8n", "to": "Coinbase Prime: Custody", "toAddress": "bc1qcp...8v4h", "amount": "119 BTC", "usd": "$9.19M", "direction": "inflow", "minutesAgo": 35},
+    {"chain": "USDC", "chainTone": "usdc", "from": "Circle Treasury", "fromAddress": "0xC1rc...3E88", "to": "Coinbase Institutional", "toAddress": "0x78C4...f0B2", "amount": "15.0M USDC", "usd": "$15.00M", "direction": "inflow", "minutesAgo": 39},
+    {"chain": "ETH", "chainTone": "eth", "from": "Coinbase Prime: Custody", "fromAddress": "0x6F2b...9D11", "to": "BlackRock: ETHA Ethereum ETF", "toAddress": "0x3a8F...41cE", "amount": "2.865K ETH", "usd": "$6.71M", "direction": "inflow", "minutesAgo": 43},
+    {"chain": "SOL", "chainTone": "sol", "from": "FalconX Prime", "fromAddress": "9JpQw...12LrM", "to": "OKX Solana Deposit", "toAddress": "4TrsE...Qm2wP", "amount": "48.0K SOL", "usd": "$6.18M", "direction": "outflow", "minutesAgo": 47},
+    {"chain": "BTC", "chainTone": "btc", "from": "Bitwise ETF Reserve", "fromAddress": "bc1qbt...8ka3", "to": "Coinbase Prime Deposit", "toAddress": "3QJmV3...eMcz", "amount": "78 BTC", "usd": "$6.04M", "direction": "outflow", "minutesAgo": 52},
+    {"chain": "USDT", "chainTone": "usdt", "from": "Alameda Recovery Wallet", "fromAddress": "TX89A...pQ3r7", "to": "Binance Deposit Wallet", "toAddress": "TY12F...jL0wE", "amount": "12.5M USDT", "usd": "$12.50M", "direction": "outflow", "minutesAgo": 56},
+    {"chain": "BNB", "chainTone": "bnb", "from": "Jump Cross-chain Treasury", "fromAddress": "0xB2d1...f8Ce", "to": "Binance Hot Wallet 7", "toAddress": "0x61A4...7d2E", "amount": "8.4K BNB", "usd": "$5.22M", "direction": "inflow", "minutesAgo": 61},
 ]
 
 

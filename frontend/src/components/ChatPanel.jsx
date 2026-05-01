@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
+import { useTheme } from '../hooks/useTheme'
 import ThemeToggle from './ThemeToggle'
 
 const REQUEST_TIMEOUT_MS = 90000
@@ -8,11 +9,11 @@ const COPY = {
   en: {
     welcome: "Hello, I'm your Elephant Jungle assistant. What can I help you with?",
     login: 'Login',
-    register: 'Register',
     guest: 'Guest',
     copy: 'Copy',
     copied: 'Copied',
     retry: 'Retry',
+    thinkingLabel: 'Thinking...',
     thinkingFrames: ['T', 'Th', 'Thi', 'Thin', 'Think', 'Thinki', 'Thinkin', 'Thinking', 'Thinking.', 'Thinking..', 'Thinking...'],
     placeholder: 'Ask something...',
     send: 'Send',
@@ -30,11 +31,11 @@ const COPY = {
   zh: {
     welcome: "Hello, I'm your Elephant Jungle assistant. 你好，请问需要什么帮助？",
     login: 'Login',
-    register: 'Regist',
     guest: 'Guest',
     copy: '复制',
     copied: '已复制',
     retry: '重试',
+    thinkingLabel: '想一下...',
     thinkingFrames: ['想', '想一', '想一下', '想一下.', '想一下..', '想一下...'],
     placeholder: '想问什么...',
     send: '发送',
@@ -128,8 +129,9 @@ function MessageActions({ copyLabel, copiedLabel, query, onRetry, retryLabel, te
   )
 }
 
-export default function ChatPanel({ apiBase, theme, setTheme, language, setLanguage }) {
+export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly = false }) {
   const copy = COPY[language] || COPY.en
+  const { theme, setTheme } = useTheme()
   const [accountEmail] = useState(() => {
     if (typeof window === 'undefined') return ''
     return window.localStorage.getItem('elephant_account_email') || ''
@@ -146,19 +148,19 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
   const inputSpriteTrackRef = useRef(null)
   const inputSpriteShellRef = useRef(null)
   const welcomeStartedRef = useRef(false)
-  const stopThinkingRef = useRef(null)
   const activeRequestRef = useRef(null)
   const activeRunIdRef = useRef(0)
   const activeBotIdRef = useRef(null)
   const fileInputRef = useRef(null)
 
-  const { spriteMode, boost, cruise } = useSpriteOrbit([
-    { trackRef: chatSpriteTrackRef, shellRef: chatSpriteShellRef, direction: 1 },
-    { trackRef: inputSpriteTrackRef, shellRef: inputSpriteShellRef, direction: -1 },
-  ])
-
-  const frames = useMemo(() => copy.thinkingFrames, [copy.thinkingFrames])
-  const frameDelays = useMemo(() => [55, 65, 75, 85, 95, 110, 125, 145, 175, 210, 250], [])
+  const { spriteMode, boost, cruise } = useSpriteOrbit(
+    mobileOnly
+      ? [{ trackRef: chatSpriteTrackRef, shellRef: chatSpriteShellRef, direction: 1 }]
+      : [
+          { trackRef: chatSpriteTrackRef, shellRef: chatSpriteShellRef, direction: 1 },
+          { trackRef: inputSpriteTrackRef, shellRef: inputSpriteShellRef, direction: -1 },
+        ],
+  )
 
   const scrollToBottom = () => {
     window.requestAnimationFrame(() => {
@@ -259,39 +261,88 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
     return extractedText
   }
 
-  const streamAssistantText = (messageId, text, query, runId, options = {}) =>
-    new Promise((resolve) => {
-      const { hideActions = false } = options
-      let index = 0
-      const tick = () => {
-        if (typeof runId === 'number' && runId !== activeRunIdRef.current) {
-          resolve(false)
-          return
-        }
-        index += 1
+  const frames = useMemo(() => copy.thinkingFrames, [copy.thinkingFrames])
+  const frameDelays = useMemo(() => [55, 65, 75, 85, 95, 110, 125, 145, 175, 210, 250], [])
+
+  const stopThinkingRef = useRef(null)
+
+  const streamThinkingText = (messageId) => {
+    if (stopThinkingRef.current) {
+      window.clearTimeout(stopThinkingRef.current)
+      stopThinkingRef.current = null
+    }
+    let frameIndex = 0
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId
+          ? { ...m, text: frames[0], thinking: true }
+          : m,
+      ),
+    )
+    scrollToBottom()
+
+    const LOOP_START = 1
+
+    const tick = () => {
+      frameIndex += 1
+      if (frameIndex >= frames.length) {
+        frameIndex = LOOP_START
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? { ...m, text: frames[frameIndex], thinking: true }
+            : m,
+        ),
+      )
+      scrollToBottom()
+      stopThinkingRef.current = window.setTimeout(tick, frameDelays[frameIndex] || 120)
+    }
+
+    stopThinkingRef.current = window.setTimeout(tick, frameDelays[0] || 55)
+  }
+
+  const streamAssistantText = (messageId, fullText, query, options = {}) => {
+    const { hideActions = false } = options
+    if (stopThinkingRef.current) {
+      window.clearTimeout(stopThinkingRef.current)
+      stopThinkingRef.current = null
+    }
+    const chars = [...fullText]
+    let revealed = 0
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId
+          ? { ...m, text: '', thinking: false, hideActions: true, hiddenWhilePending: false, query }
+          : m,
+      ),
+    )
+    scrollToBottom()
+
+    const intervalId = window.setInterval(() => {
+      revealed += 1
+      if (revealed >= chars.length) {
+        window.clearInterval(intervalId)
         setMessages((prev) =>
-          prev.map((message) =>
-            message.id === messageId
-              ? {
-                  ...message,
-                  text: text.slice(0, index),
-                  thinking: false,
-                  hideActions,
-                  hiddenWhilePending: false,
-                  query,
-                }
-              : message,
+          prev.map((m) =>
+            m.id === messageId
+              ? { ...m, text: fullText, thinking: false, hideActions, hiddenWhilePending: false }
+              : m,
           ),
         )
         scrollToBottom()
-        if (index < text.length) {
-          window.setTimeout(tick, 38)
-        } else {
-          resolve(true)
-        }
+        return
       }
-      window.setTimeout(tick, 180)
-    })
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? { ...m, text: chars.slice(0, revealed).join(''), thinking: false, hideActions: true }
+            : m,
+        ),
+      )
+      scrollToBottom()
+    }, 32)
+  }
 
   useEffect(() => {
     const welcomeId = 'bot-welcome'
@@ -300,7 +351,7 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
       welcomeStartedRef.current = true
       setMessages([{ id: welcomeId, role: 'bot', text: '', query: '', hideActions: true }])
       scrollToBottom()
-      streamAssistantText(welcomeId, copy.welcome, '', undefined, { hideActions: true })
+      streamAssistantText(welcomeId, copy.welcome, '', { hideActions: true })
       return
     }
 
@@ -312,34 +363,15 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
     })
   }, [copy.welcome])
 
-  const runThinking = (messageId) => {
-    let index = 0
-    let stopped = false
-    const tick = () => {
-      if (stopped) return
-      setMessages((prev) =>
-        prev.map((message) => (message.id === messageId ? { ...message, text: frames[index], thinking: true } : message)),
-      )
-      scrollToBottom()
-      const delay = frameDelays[index % frameDelays.length]
-      index = (index + 1) % frames.length
-      window.setTimeout(tick, delay)
-    }
-    tick()
-    return () => {
-      stopped = true
-    }
-  }
-
   const interruptActiveReply = () => {
     activeRunIdRef.current += 1
+    if (stopThinkingRef.current) {
+      window.clearTimeout(stopThinkingRef.current)
+      stopThinkingRef.current = null
+    }
     if (activeRequestRef.current) {
       activeRequestRef.current.abort()
       activeRequestRef.current = null
-    }
-    if (typeof stopThinkingRef.current === 'function') {
-      stopThinkingRef.current()
-      stopThinkingRef.current = null
     }
     if (activeBotIdRef.current) {
       const interruptedBotId = activeBotIdRef.current
@@ -382,16 +414,18 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
       if (userMessage) next.push(userMessage)
       if (retryMessageId) {
         return next.map((message) =>
-          message.id === retryMessageId ? { ...message, text: frames[0], thinking: true } : message,
+          message.id === retryMessageId ? { ...message, text: '', thinking: true } : message,
         )
       }
-      next.push({ id: botId, role: 'bot', text: frames[0], thinking: true, query: userText })
+      next.push({ id: botId, role: 'bot', text: '', thinking: true, query: userText })
       return next
     })
     scrollToBottom()
-
-    const stopThinking = runThinking(botId)
-    stopThinkingRef.current = stopThinking
+    if (retryMessageId) {
+      streamThinkingText(retryMessageId)
+    } else {
+      streamThinkingText(botId)
+    }
 
     try {
       let backendQuery = query
@@ -408,9 +442,7 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
 
       const answer = await askBackend(backendQuery, controller, { useRag })
       if (runId !== activeRunIdRef.current) return
-      stopThinking()
-      stopThinkingRef.current = null
-      await streamAssistantText(botId, answer, backendQuery, runId)
+      streamAssistantText(botId, answer, backendQuery)
       setSelectedImageFile(null)
       setSelectedImagePreview('')
       setOcrState(null)
@@ -419,14 +451,12 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
         return
       }
       if (runId !== activeRunIdRef.current) return
-      stopThinking()
-      stopThinkingRef.current = null
       if (selectedImageFile) {
         setSelectedImageFile(null)
         setSelectedImagePreview('')
         setOcrState(null)
       }
-      await streamAssistantText(botId, `${copy.backendError}: ${error.message}`, query, runId)
+      streamAssistantText(botId, `${copy.backendError}: ${error.message}`, query)
     } finally {
       if (activeRequestRef.current === controller) {
         activeRequestRef.current = null
@@ -442,9 +472,9 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
   }
 
   return (
-    <div className="right-col">
-      <div className="right-topbar">
-        <div className="right-topbar-left">
+    <div className={`right-col ${mobileOnly ? 'mobile-chat-col' : ''}`}>
+      <div className={`right-topbar ${mobileOnly ? 'mobile-chat-topbar' : ''}`}>
+        <div className={`right-topbar-left ${mobileOnly ? 'mobile-chat-topbar-left' : ''}`}>
           <div className="language-toggle" role="group" aria-label="Language toggle">
             <button
               type="button"
@@ -461,9 +491,9 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
               English
             </button>
           </div>
-        </div>
-        <div className="right-topbar-right">
           <ThemeToggle theme={theme} setTheme={setTheme} language={language} />
+        </div>
+        <div className={`right-topbar-right ${mobileOnly ? 'mobile-chat-topbar-right' : ''}`}>
           <div className="account-chip" role="button" tabIndex={0}>
             <span className="account-chip-avatar" aria-hidden="true">
               {accountEmail ? accountEmail.slice(0, 1).toUpperCase() : 'E'}
@@ -474,16 +504,14 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
               ) : (
                 <div className="account-chip-actions">
                   <span className="account-chip-action">{copy.login}</span>
-                  <span className="account-chip-divider" aria-hidden="true" />
-                  <span className="account-chip-action">{copy.register}</span>
                 </div>
               )}
             </div>
           </div>
         </div>
       </div>
-      <div className="right-panel">
-      <div className="chat-stage">
+      <div className={`right-panel ${mobileOnly ? 'mobile-chat-panel' : ''}`}>
+      <div className={`chat-stage ${mobileOnly ? 'mobile-chat-stage' : ''}`}>
         <div className="chat-sprite-track" ref={chatSpriteTrackRef} aria-hidden="true">
           <div className="sprite-shell facing-right" ref={chatSpriteShellRef}>
             <div className={`sprite-avatar ${spriteMode}`} />
@@ -514,13 +542,15 @@ export default function ChatPanel({ apiBase, theme, setTheme, language, setLangu
             ))}
         </div>
       </div>
-      <div className="input-row">
+      <div className={`input-row ${mobileOnly ? 'mobile-chat-input-row' : ''}`}>
         <div className="input-wrap">
-          <div className="input-sprite-track" ref={inputSpriteTrackRef} aria-hidden="true">
-            <div className="sprite-shell facing-left" ref={inputSpriteShellRef}>
-              <div className={`sprite-avatar ${spriteMode}`} />
+          {!mobileOnly ? (
+            <div className="input-sprite-track" ref={inputSpriteTrackRef} aria-hidden="true">
+              <div className="sprite-shell facing-left" ref={inputSpriteShellRef}>
+                <div className={`sprite-avatar ${spriteMode}`} />
+              </div>
             </div>
-          </div>
+          ) : null}
           <div className="chat-input-shell">
             <button
               className="image-ocr-button"

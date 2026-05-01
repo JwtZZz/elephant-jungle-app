@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 const COPY = {
   en: {
@@ -71,8 +71,8 @@ function rangeSpreadLabel(low, high, copy) {
   return `${copy.spread} ${ratio.toFixed(ratio >= 10 ? 1 : 2)}%`
 }
 
-const MAG_MAX_SCALE = 2
-const MAG_MAX_DISTANCE = 140
+const MAG_MAX_SCALE = 0.5
+const MAG_MAX_DISTANCE = 156
 
 function resetRowCells(row) {
   if (!row) return
@@ -86,7 +86,69 @@ function resetRowCells(row) {
 export default function MarketBoard({ rows, language, onSelectCoin }) {
   const copy = COPY[language] || COPY.en
   const rowsContainerRef = useRef(null)
+  const rowsTrackRef = useRef(null)
   const activeRowRef = useRef(null)
+  const hoverPauseRef = useRef(false)
+  const manualPauseUntilRef = useRef(0)
+  const autoOffsetRef = useRef(0)
+  const manualOffsetRef = useRef(0)
+  const loopHeightRef = useRef(0)
+  const marqueeBaseRows = rows.length
+    ? Array.from({ length: Math.max(2, Math.ceil(18 / rows.length)) }, () => rows).flat()
+    : []
+  const marqueeRows = marqueeBaseRows.length ? [...marqueeBaseRows, ...marqueeBaseRows] : []
+
+  useEffect(() => {
+    const track = rowsTrackRef.current
+    if (!track || !marqueeRows.length) return undefined
+
+    let frameId = 0
+    let lastTime = performance.now()
+    const pixelsPerSecond = 30
+
+    const normalize = (value) => {
+      const loopHeight = loopHeightRef.current
+      if (!loopHeight) return 0
+      let normalized = value % loopHeight
+      if (normalized < 0) normalized += loopHeight
+      return normalized
+    }
+
+    const measure = () => {
+      const currentTrack = rowsTrackRef.current
+      if (!currentTrack) return
+      loopHeightRef.current = currentTrack.scrollHeight / 2
+      autoOffsetRef.current = normalize(autoOffsetRef.current)
+      manualOffsetRef.current = normalize(manualOffsetRef.current)
+    }
+
+    const tick = (now) => {
+      const currentTrack = rowsTrackRef.current
+      if (!currentTrack) return
+
+      const pauseExpired = now >= manualPauseUntilRef.current
+      if (!hoverPauseRef.current && pauseExpired) {
+        if (loopHeightRef.current > 0) {
+          const delta = ((now - lastTime) / 1000) * pixelsPerSecond
+          autoOffsetRef.current = normalize(autoOffsetRef.current + delta)
+        }
+      }
+
+      const translateY = normalize(autoOffsetRef.current + manualOffsetRef.current)
+      currentTrack.style.transform = `translate3d(0, ${-translateY}px, 0)`
+
+      lastTime = now
+      frameId = window.requestAnimationFrame(tick)
+    }
+
+    measure()
+    window.addEventListener('resize', measure)
+    frameId = window.requestAnimationFrame(tick)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.cancelAnimationFrame(frameId)
+    }
+  }, [marqueeRows.length])
 
   const handleRowsPointerMove = useCallback((event) => {
     const topEl = document.elementFromPoint(event.clientX, event.clientY)
@@ -116,33 +178,28 @@ export default function MarketBoard({ rows, language, onSelectCoin }) {
   }, [])
 
   const handleRowsPointerLeave = useCallback(() => {
+    hoverPauseRef.current = false
     if (activeRowRef.current) {
       resetRowCells(activeRowRef.current)
       activeRowRef.current = null
     }
   }, [])
 
-  const handlePointerMove = (event) => {
-    const board = event.currentTarget
-    const bounds = board.getBoundingClientRect()
-    const x = (event.clientX - bounds.left) / bounds.width
-    const y = (event.clientY - bounds.top) / bounds.height
-    board.style.setProperty('--tilt-rotate-x', `${((0.5 - y) * 6).toFixed(2)}deg`)
-    board.style.setProperty('--tilt-rotate-y', `${((x - 0.5) * 8).toFixed(2)}deg`)
-    board.style.setProperty('--tilt-glow-x', `${(x * 100).toFixed(2)}%`)
-    board.style.setProperty('--tilt-glow-y', `${(y * 100).toFixed(2)}%`)
-  }
+  const pauseForManualControl = useCallback((duration = 1600) => {
+    manualPauseUntilRef.current = performance.now() + duration
+  }, [])
 
-  const resetTilt = (event) => {
-    const board = event.currentTarget
-    board.style.setProperty('--tilt-rotate-x', '0deg')
-    board.style.setProperty('--tilt-rotate-y', '0deg')
-    board.style.setProperty('--tilt-glow-x', '50%')
-    board.style.setProperty('--tilt-glow-y', '32%')
-  }
+  const adjustManualOffset = useCallback((deltaY) => {
+    const loopHeight = loopHeightRef.current
+    if (!loopHeight) return
+    let next = manualOffsetRef.current + deltaY
+    next %= loopHeight
+    if (next < 0) next += loopHeight
+    manualOffsetRef.current = next
+  }, [])
 
   return (
-    <section className="market-board" onPointerMove={handlePointerMove} onPointerLeave={resetTilt}>
+    <section className="market-board">
       <div className="market-board-sheen" aria-hidden="true" />
       <div className="market-header">
         <div>{copy.asset}</div>
@@ -156,12 +213,29 @@ export default function MarketBoard({ rows, language, onSelectCoin }) {
         <div>{copy.cap}</div>
       </div>
 
-      <div className="market-rows" ref={rowsContainerRef} onPointerMove={handleRowsPointerMove} onPointerLeave={handleRowsPointerLeave}>
-        {rows.map((row) => {
+      <div
+        className="market-rows"
+        ref={rowsContainerRef}
+        onPointerEnter={() => {
+          hoverPauseRef.current = true
+        }}
+        onPointerMove={handleRowsPointerMove}
+        onPointerLeave={handleRowsPointerLeave}
+        onWheel={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          hoverPauseRef.current = true
+          pauseForManualControl(2200)
+          adjustManualOffset(event.deltaY * 1.35)
+        }}
+        onTouchStart={() => pauseForManualControl(1800)}
+      >
+        <div className="market-rows-track" ref={rowsTrackRef}>
+        {marqueeRows.map((row, index) => {
           const isUp = Number(row.change) >= 0
           return (
             <button
-              key={row.symbol}
+              key={`${row.symbol}-${index}`}
               type="button"
               className="market-row market-row-button"
               onClick={() => onSelectCoin(row)}
@@ -204,6 +278,7 @@ export default function MarketBoard({ rows, language, onSelectCoin }) {
             </button>
           )
         })}
+        </div>
       </div>
     </section>
   )

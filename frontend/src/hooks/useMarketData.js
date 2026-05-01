@@ -5,10 +5,18 @@ const MARKET_REFRESH_MS = 3000
 const BRIEFS_REFRESH_MS = 5 * 60 * 60 * 1000
 
 function getApiBase() {
-  if (window.location.hostname.endsWith('trycloudflare.com')) {
+  const hostname = window.location.hostname || '127.0.0.1'
+  if (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0'
+  ) {
+    return `${window.location.protocol}//${hostname}:8000`
+  }
+  if (hostname.endsWith('trycloudflare.com')) {
     return window.location.origin
   }
-  return `${window.location.protocol}//${window.location.hostname || '127.0.0.1'}:8000`
+  return window.location.origin
 }
 
 export function useMarketData() {

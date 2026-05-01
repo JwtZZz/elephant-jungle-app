@@ -153,12 +153,6 @@ export default function AgentsView({ apiBase, language }) {
       <div className="meme-split">
         {/* ── Left: Launch Form ── */}
         <div className="meme-left">
-          <div className="launch-builder-head launch-builder-head-simple">
-            <div>
-              <h2 className="launch-builder-title">{copy.title}</h2>
-            </div>
-          </div>
-
           <section className="launch-form-card launch-form-card-compact">
             <div className="launch-image-placeholder">
               <div className="launch-image-drop">

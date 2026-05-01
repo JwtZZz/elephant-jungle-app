@@ -15,6 +15,8 @@ def _get_chat_provider() -> str:
     provider = os.getenv("CHAT_PROVIDER", "").strip().lower()
     if provider:
         return provider
+    if os.getenv("DASHSCOPE_API_KEY", "").strip():
+        return "dashscope"
     if os.getenv("NVIDIA_API_KEY", "").strip():
         return "nvidia"
     return "minimax"
@@ -23,6 +25,8 @@ def _get_chat_provider() -> str:
 def validate_provider_env() -> None:
     _must_env("DASHSCOPE_API_KEY")
     provider = _get_chat_provider()
+    if provider == "dashscope":
+        return
     if provider == "nvidia":
         _must_env("NVIDIA_API_KEY")
         return
@@ -123,8 +127,40 @@ def _nvidia_chat_completion(messages: list[dict], temperature: float = 0.2) -> s
     raise RuntimeError(f"Bad NVIDIA response: {payload}")
 
 
+def _dashscope_chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
+    api_key = _must_env("DASHSCOPE_API_KEY")
+    model = os.getenv("ALI_CHAT_MODEL", "qwen3.5-flash")
+    url = os.getenv(
+        "ALI_CHAT_URL",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    )
+    data = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": 1024,
+        "stream": False,
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(url, headers=headers, json=data)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    choices = payload.get("choices", [])
+    if choices:
+        message = choices[0].get("message", {})
+        content = _extract_message_text(message)
+        if content:
+            return content
+    raise RuntimeError(f"Bad DashScope response: {payload}")
+
+
 def _chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
     provider = _get_chat_provider()
+    if provider == "dashscope":
+        return _dashscope_chat_completion(messages, temperature=temperature)
     if provider == "nvidia":
         return _nvidia_chat_completion(messages, temperature=temperature)
     if provider == "minimax":
