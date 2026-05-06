@@ -9,6 +9,13 @@ const SPRITE_BUBBLE_TYPE_MS = 18
 const SPRITE_BUBBLE_HOLD_MS = 1500
 const MOBILE_KEYBOARD_CLOSE_DELTA = 96
 
+function shortEmail(email) {
+  const atIndex = email.indexOf('@')
+  if (atIndex <= 0) return email
+  const prefix = email.slice(0, Math.min(atIndex, 3))
+  return `${prefix}...`
+}
+
 function cleanHeadlineTitle(title = '') {
   return String(title)
     .replace(/\s+/g, ' ')
@@ -210,7 +217,6 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const [selectedImageFile, setSelectedImageFile] = useState(null)
   const [selectedImagePreview, setSelectedImagePreview] = useState('')
   const [spriteBubbleText, setSpriteBubbleText] = useState('')
-  const [mobileTopbarOffset, setMobileTopbarOffset] = useState(84)
   const [spriteBriefSnippets, setSpriteBriefSnippets] = useState(() =>
     language === 'zh'
       ? ['BTC新高', 'ETF流向', 'ETH动态', 'Meme热度']
@@ -549,32 +555,6 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   }, [mobileOnly])
 
   useEffect(() => {
-    if (!mobileOnly || typeof window === 'undefined') return undefined
-
-    const measure = () => {
-      const nextHeight = (topbarRef.current?.offsetHeight || 72) + 62
-      setMobileTopbarOffset(nextHeight)
-    }
-
-    measure()
-
-    let observer
-    if (typeof ResizeObserver !== 'undefined' && topbarRef.current) {
-      observer = new ResizeObserver(measure)
-      observer.observe(topbarRef.current)
-    }
-
-    window.addEventListener('resize', measure)
-    window.addEventListener('orientationchange', measure)
-
-    return () => {
-      observer?.disconnect?.()
-      window.removeEventListener('resize', measure)
-      window.removeEventListener('orientationchange', measure)
-    }
-  }, [mobileOnly, language, userEmail])
-
-  useEffect(() => {
     setEmailDraft(userEmail || '')
   }, [userEmail, accountSheetOpen])
 
@@ -859,7 +839,6 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   return (
     <div
       className={`right-col ${mobileOnly ? 'mobile-chat-col' : ''}`}
-      style={mobileOnly ? { '--mobile-topbar-offset': `${mobileTopbarOffset}px` } : undefined}
     >
       <div ref={topbarRef} className={`right-topbar ${mobileOnly ? 'mobile-chat-topbar' : ''}`}>
         <div className={`right-topbar-left ${mobileOnly ? 'mobile-chat-topbar-left' : ''}`}>
@@ -892,7 +871,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
             </span>
             <div className="account-chip-copy">
               {userEmail ? (
-                <span className="account-chip-email">{userEmail}</span>
+                <span className="account-chip-email">{shortEmail(userEmail)}</span>
               ) : (
                 <div className="account-chip-actions">
                   <span className="account-chip-action">{copy.login}</span>

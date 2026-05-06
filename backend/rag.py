@@ -334,7 +334,7 @@ def search(
     language: str | None = None,
 ) -> list[dict]:
     query_vector = embed_texts([query])[0]
-    return search_chunks(query_embedding=query_vector, top_k=top_k, language=language)
+    return search_chunks(query_embedding=query_vector, top_k=top_k)
 
 
 def _detect_query_language(query: str) -> str | None:

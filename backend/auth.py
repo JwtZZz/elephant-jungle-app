@@ -78,20 +78,23 @@ def send_verification_email(email: str, code: str) -> None:
 
         resend.api_key = api_key
         sender = os.getenv("RESEND_SENDER", "onboarding@resend.dev")
-        resend.Emails.send(
-            params={
-                "from": sender,
-                "to": [email],
-                "subject": "Elephant Jungle verification code",
-                "html": (
-                    "<div style='font-family:sans-serif;padding:24px;max-width:480px'>"
-                    "<h2>Elephant Jungle</h2>"
-                    f"<p>Your verification code is:</p>"
-                    f"<div style='font-size:32px;letter-spacing:6px;font-weight:bold;padding:16px 0'>{code}</div>"
-                    f"<p style='color:#666'>This code expires in 5 minutes.</p>"
-                    "</div>"
-                ),
-            }
-        )
+        try:
+            resend.Emails.send(
+                params={
+                    "from": sender,
+                    "to": [email],
+                    "subject": "Elephant Jungle verification code",
+                    "html": (
+                        "<div style='font-family:sans-serif;padding:24px;max-width:480px'>"
+                        "<h2>Elephant Jungle</h2>"
+                        f"<p>Your verification code is:</p>"
+                        f"<div style='font-size:32px;letter-spacing:6px;font-weight:bold;padding:16px 0'>{code}</div>"
+                        f"<p style='color:#666'>This code expires in 5 minutes.</p>"
+                        "</div>"
+                    ),
+                }
+            )
+        except Exception as exc:
+            print(f"Resend failed for {email}: {exc}")
     else:
         print(f"\n=== DEV MODE: verification code for {email} -> {code} ===\n")
