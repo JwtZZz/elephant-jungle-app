@@ -255,13 +255,17 @@ def ocr_image_data_url(image_data_url: str, prompt: str | None = None) -> str:
 def generate_answer(query: str, contexts: list[str]) -> str:
     context_text = "\n\n".join([f"[{i + 1}] {c}" for i, c in enumerate(contexts)])
     system_prompt = (
-        "You are a RAG assistant. Answer in natural Chinese with a warm, human tone. "
-        "Use the provided context first. If the context is weak or incomplete, still be helpful, "
-        "but stay honest about uncertainty. Do not use Markdown headings, bold markers, bullet lists, "
-        "or numbered lists unless the user explicitly asks for structured formatting. "
+        "You are a cryptocurrency and Web3 knowledge assistant. "
+        "Answer in natural Chinese with a warm, human tone. "
+        "Use the provided reference material to answer the question. "
+        "Cite sources by their number in brackets, e.g. [1] [2]. "
+        "If the provided material does not contain enough information to answer reliably, "
+        "say so honestly - do not invent facts or speculate beyond the references. "
+        "Do not use Markdown headings, bold markers, bullet lists, or numbered lists "
+        "unless the user explicitly asks for structured formatting. "
         "Prefer short natural paragraphs that sound like a person explaining something clearly."
     )
-    user_prompt = f"Context:\n{context_text}\n\nQuestion:\n{query}"
+    user_prompt = f"Reference material:\n{context_text}\n\nQuestion: {query}"
     return _chat_completion(
         [
             {"role": "system", "content": system_prompt},

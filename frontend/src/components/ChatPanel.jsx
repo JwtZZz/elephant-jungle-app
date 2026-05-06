@@ -1,14 +1,62 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
 import { useTheme } from '../hooks/useTheme'
 import ThemeToggle from './ThemeToggle'
 
 const REQUEST_TIMEOUT_MS = 90000
+const SPRITE_BRIEF_REFRESH_MS = 15 * 60 * 1000
+const SPRITE_BUBBLE_TYPE_MS = 18
+const SPRITE_BUBBLE_HOLD_MS = 1500
+const MOBILE_KEYBOARD_CLOSE_DELTA = 96
+
+function cleanHeadlineTitle(title = '') {
+  return String(title)
+    .replace(/\s+/g, ' ')
+    .replace(/\s+[|·-]\s+[^|·-]+$/, '')
+    .trim()
+}
+
+function toBubbleSnippet(title, language) {
+  const cleaned = cleanHeadlineTitle(title)
+  if (!cleaned) return ''
+
+  if (language === 'zh') {
+    return cleaned.replace(/\s+/g, '').slice(0, 12)
+  }
+
+  const normalized = cleaned.replace(/[^A-Za-z0-9$%+\-\u4e00-\u9fff ]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!normalized) return cleaned.slice(0, 14)
+  return normalized.slice(0, 16).trim()
+}
+
+function extractBriefSnippets(payload, language) {
+  const items = [...(payload?.social || []), ...(payload?.news || [])]
+  const seen = new Set()
+  const snippets = []
+
+  for (const item of items) {
+    const snippet = toBubbleSnippet(item?.title || '', language)
+    if (!snippet || seen.has(snippet)) continue
+    seen.add(snippet)
+    snippets.push(snippet)
+    if (snippets.length >= 8) break
+  }
+
+  return snippets
+}
 
 const COPY = {
   en: {
     welcome: "Hello, I'm your Elephant Jungle assistant. What can I help you with?",
     login: 'Login',
+    loginTitle: 'Email Login',
+    emailPlaceholder: 'Email address',
+    codePlaceholder: 'Verification code',
+    sendCode: 'Send Code',
+    differentEmail: 'Use a different email',
+    confirmLogin: 'Confirm',
+    cancel: 'Cancel',
+    logout: 'Logout',
     guest: 'Guest',
     copy: 'Copy',
     copied: 'Copied',
@@ -31,6 +79,14 @@ const COPY = {
   zh: {
     welcome: "Hello, I'm your Elephant Jungle assistant. 你好，请问需要什么帮助？",
     login: 'Login',
+    loginTitle: '邮箱登录',
+    emailPlaceholder: '邮箱地址',
+    codePlaceholder: '验证码',
+    sendCode: '发送验证码',
+    differentEmail: '换个邮箱',
+    confirmLogin: '确认',
+    cancel: '取消',
+    logout: '退出登录',
     guest: 'Guest',
     copy: '复制',
     copied: '已复制',
@@ -132,16 +188,34 @@ function MessageActions({ copyLabel, copiedLabel, query, onRetry, retryLabel, te
 export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly = false }) {
   const copy = COPY[language] || COPY.en
   const { theme, setTheme } = useTheme()
-  const [accountEmail] = useState(() => {
+  const [authToken, setAuthToken] = useState(() => {
     if (typeof window === 'undefined') return ''
-    return window.localStorage.getItem('elephant_account_email') || ''
+    return window.localStorage.getItem('elephant_auth_token') || ''
   })
+  const [userEmail, setUserEmail] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return window.localStorage.getItem('elephant_user_email') || ''
+  })
+  const [accountSheetOpen, setAccountSheetOpen] = useState(false)
+  const [emailDraft, setEmailDraft] = useState('')
+  const [codeDraft, setCodeDraft] = useState('')
+  const [codeSent, setCodeSent] = useState(false)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [ocrState, setOcrState] = useState(null)
   const [selectedImageFile, setSelectedImageFile] = useState(null)
   const [selectedImagePreview, setSelectedImagePreview] = useState('')
+  const [spriteBubbleText, setSpriteBubbleText] = useState('')
+  const [mobileTopbarOffset, setMobileTopbarOffset] = useState(84)
+  const [spriteBriefSnippets, setSpriteBriefSnippets] = useState(() =>
+    language === 'zh'
+      ? ['BTC新高', 'ETF流向', 'ETH动态', 'Meme热度']
+      : ['BTC move', 'ETF flow', 'ETH watch', 'Meme heat'],
+  )
   const chatBoxRef = useRef(null)
   const chatSpriteTrackRef = useRef(null)
   const chatSpriteShellRef = useRef(null)
@@ -152,6 +226,8 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const activeRunIdRef = useRef(0)
   const activeBotIdRef = useRef(null)
   const fileInputRef = useRef(null)
+  const textInputRef = useRef(null)
+  const topbarRef = useRef(null)
 
   const { spriteMode, boost, cruise } = useSpriteOrbit(
     mobileOnly
@@ -170,6 +246,22 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     })
   }
 
+  const snapViewportToTop = () => {
+    if (!mobileOnly || typeof window === 'undefined') return
+
+    const jumpTop = () => {
+      window.scrollTo(0, 0)
+      document.documentElement.scrollTop = 0
+      document.body.scrollTop = 0
+      topbarRef.current?.scrollIntoView?.({ block: 'start', inline: 'nearest' })
+    }
+
+    window.requestAnimationFrame(() => {
+      jumpTop()
+      window.requestAnimationFrame(jumpTop)
+    })
+  }
+
   const askBackend = async (query, controller, options = {}) => {
     const { useRag = true } = options
     let didTimeout = false
@@ -179,9 +271,14 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     }, REQUEST_TIMEOUT_MS)
 
     try {
+      const headers = { 'Content-Type': 'application/json' }
+      const token = window.localStorage.getItem('elephant_auth_token')
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
       const response = await fetch(`${apiBase}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ query, top_k: 5, use_rag: useRag }),
         signal: controller.signal,
       })
@@ -341,8 +438,294 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         ),
       )
       scrollToBottom()
-    }, 32)
+    }, 20)
   }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadBriefSnippets = async () => {
+      try {
+        const response = await fetch(`${apiBase}/market/briefs`)
+        if (!response.ok) return
+        const payload = await response.json()
+        const snippets = extractBriefSnippets(payload, language)
+        if (!cancelled && snippets.length) {
+          setSpriteBriefSnippets(snippets)
+        }
+      } catch (error) {
+        console.error('Sprite briefs fallback', error)
+      }
+    }
+
+    loadBriefSnippets()
+    const timer = window.setInterval(loadBriefSnippets, SPRITE_BRIEF_REFRESH_MS)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [apiBase, language])
+
+  useEffect(() => {
+    if (!spriteBriefSnippets.length) {
+      setSpriteBubbleText('')
+      return undefined
+    }
+
+    let snippetIndex = 0
+    let charIndex = 0
+    let typeTimer = null
+    let holdTimer = null
+    let stopped = false
+
+    const typeNext = () => {
+      if (stopped) return
+      const snippet = spriteBriefSnippets[snippetIndex % spriteBriefSnippets.length] || ''
+      if (!snippet) return
+      charIndex += 1
+      setSpriteBubbleText(snippet.slice(0, charIndex))
+      if (charIndex < snippet.length) {
+        typeTimer = window.setTimeout(typeNext, SPRITE_BUBBLE_TYPE_MS)
+        return
+      }
+      holdTimer = window.setTimeout(() => {
+        snippetIndex = (snippetIndex + 1) % spriteBriefSnippets.length
+        charIndex = 0
+        setSpriteBubbleText('')
+        typeTimer = window.setTimeout(typeNext, 120)
+      }, SPRITE_BUBBLE_HOLD_MS)
+    }
+
+    setSpriteBubbleText('')
+    typeTimer = window.setTimeout(typeNext, 120)
+
+    return () => {
+      stopped = true
+      if (typeTimer) window.clearTimeout(typeTimer)
+      if (holdTimer) window.clearTimeout(holdTimer)
+    }
+  }, [spriteBriefSnippets])
+
+  useEffect(() => {
+    if (!mobileOnly || typeof window === 'undefined') return undefined
+
+    const root = document.documentElement
+    const body = document.body
+    const previousHtmlOverflow = root.style.overflow
+    const previousBodyOverflow = body.style.overflow
+    const previousHtmlOverscroll = root.style.overscrollBehaviorY
+    const previousBodyOverscroll = body.style.overscrollBehaviorY
+
+    root.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+    root.style.overscrollBehaviorY = 'none'
+    body.style.overscrollBehaviorY = 'none'
+
+    let maxViewportHeight = window.visualViewport?.height || window.innerHeight
+
+    const handleViewportResize = () => {
+      const currentHeight = window.visualViewport?.height || window.innerHeight
+      if (currentHeight > maxViewportHeight) {
+        maxViewportHeight = currentHeight
+      }
+      if (currentHeight >= maxViewportHeight - MOBILE_KEYBOARD_CLOSE_DELTA) {
+        snapViewportToTop()
+      }
+    }
+
+    const viewport = window.visualViewport
+    viewport?.addEventListener('resize', handleViewportResize)
+    window.addEventListener('orientationchange', snapViewportToTop)
+
+    return () => {
+      viewport?.removeEventListener('resize', handleViewportResize)
+      window.removeEventListener('orientationchange', snapViewportToTop)
+      root.style.overflow = previousHtmlOverflow
+      body.style.overflow = previousBodyOverflow
+      root.style.overscrollBehaviorY = previousHtmlOverscroll
+      body.style.overscrollBehaviorY = previousBodyOverscroll
+    }
+  }, [mobileOnly])
+
+  useEffect(() => {
+    if (!mobileOnly || typeof window === 'undefined') return undefined
+
+    const measure = () => {
+      const nextHeight = (topbarRef.current?.offsetHeight || 72) + 62
+      setMobileTopbarOffset(nextHeight)
+    }
+
+    measure()
+
+    let observer
+    if (typeof ResizeObserver !== 'undefined' && topbarRef.current) {
+      observer = new ResizeObserver(measure)
+      observer.observe(topbarRef.current)
+    }
+
+    window.addEventListener('resize', measure)
+    window.addEventListener('orientationchange', measure)
+
+    return () => {
+      observer?.disconnect?.()
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('orientationchange', measure)
+    }
+  }, [mobileOnly, language, userEmail])
+
+  useEffect(() => {
+    setEmailDraft(userEmail || '')
+  }, [userEmail, accountSheetOpen])
+
+  const authFetch = async (path, body) => {
+    const response = await fetch(`${apiBase}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(payload.detail || 'Request failed')
+    }
+    return response.json()
+  }
+
+  const checkAuth = useCallback(async () => {
+    const token = window.localStorage.getItem('elephant_auth_token')
+    const email = window.localStorage.getItem('elephant_user_email')
+    if (!token || !email) return
+    try {
+      const response = await fetch(`${apiBase}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) throw new Error('invalid token')
+      setAuthToken(token)
+      setUserEmail(email)
+    } catch {
+      window.localStorage.removeItem('elephant_auth_token')
+      window.localStorage.removeItem('elephant_user_email')
+      setAuthToken('')
+      setUserEmail('')
+    }
+  }, [apiBase])
+
+  useEffect(() => {
+    checkAuth()
+  }, [checkAuth])
+
+  const loadChatHistory = useCallback(async () => {
+    const token = window.localStorage.getItem('elephant_auth_token')
+    if (!token) return
+    try {
+      const response = await fetch(`${apiBase}/chat/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) return
+      const data = await response.json()
+      const history = (data.messages || []).map((msg) => ({
+        id: `hist-${msg.id}`,
+        role: msg.role === 'bot' ? 'bot' : 'user',
+        text: msg.content,
+        query: msg.query || '',
+        hideActions: true,
+        hiddenWhilePending: false,
+      }))
+      if (history.length) {
+        setMessages(history)
+        setHistoryLoaded(true)
+      }
+    } catch {
+      // silently fail
+    }
+  }, [apiBase])
+
+  useEffect(() => {
+    if (authToken && !historyLoaded) {
+      loadChatHistory()
+    }
+  }, [authToken, historyLoaded, loadChatHistory])
+
+  const sendVerificationCode = async () => {
+    const normalized = emailDraft.trim()
+    if (!normalized || !normalized.includes('@')) {
+      setAuthError('Please enter a valid email address')
+      return
+    }
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      await authFetch('/auth/send-code', { email: normalized })
+      setCodeSent(true)
+    } catch (error) {
+      setAuthError(error.message)
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const verifyAndLogin = async () => {
+    const code = codeDraft.trim()
+    if (!code || code.length !== 6) {
+      setAuthError('Please enter the 6-digit verification code')
+      return
+    }
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      const data = await authFetch('/auth/verify-code', {
+        email: emailDraft.trim(),
+        code,
+      })
+      setAuthToken(data.token)
+      setUserEmail(data.user.email)
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('elephant_auth_token', data.token)
+        window.localStorage.setItem('elephant_user_email', data.user.email)
+      }
+      setHistoryLoaded(false)
+      setAccountSheetOpen(false)
+      resetAuthForm()
+    } catch (error) {
+      setAuthError(error.message)
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const logout = () => {
+    setAuthToken('')
+    setUserEmail('')
+    setMessages([])
+    setHistoryLoaded(false)
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('elephant_auth_token')
+      window.localStorage.removeItem('elephant_user_email')
+    }
+    setAccountSheetOpen(false)
+    resetAuthForm()
+    // Re-trigger welcome message
+    welcomeStartedRef.current = false
+  }
+
+  const resetAuthForm = () => {
+    setEmailDraft('')
+    setCodeDraft('')
+    setCodeSent(false)
+    setAuthError('')
+  }
+
+  const openAccountSheet = () => {
+    resetAuthForm()
+    setEmailDraft(userEmail || '')
+    setAccountSheetOpen(true)
+  }
+
+  useEffect(() => {
+    if (!accountSheetOpen) {
+      resetAuthForm()
+    }
+  }, [accountSheetOpen])
 
   useEffect(() => {
     const welcomeId = 'bot-welcome'
@@ -443,6 +826,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       const answer = await askBackend(backendQuery, controller, { useRag })
       if (runId !== activeRunIdRef.current) return
       streamAssistantText(botId, answer, backendQuery)
+      snapViewportToTop()
       setSelectedImageFile(null)
       setSelectedImagePreview('')
       setOcrState(null)
@@ -457,6 +841,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         setOcrState(null)
       }
       streamAssistantText(botId, `${copy.backendError}: ${error.message}`, query)
+      snapViewportToTop()
     } finally {
       if (activeRequestRef.current === controller) {
         activeRequestRef.current = null
@@ -472,8 +857,11 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   }
 
   return (
-    <div className={`right-col ${mobileOnly ? 'mobile-chat-col' : ''}`}>
-      <div className={`right-topbar ${mobileOnly ? 'mobile-chat-topbar' : ''}`}>
+    <div
+      className={`right-col ${mobileOnly ? 'mobile-chat-col' : ''}`}
+      style={mobileOnly ? { '--mobile-topbar-offset': `${mobileTopbarOffset}px` } : undefined}
+    >
+      <div ref={topbarRef} className={`right-topbar ${mobileOnly ? 'mobile-chat-topbar' : ''}`}>
         <div className={`right-topbar-left ${mobileOnly ? 'mobile-chat-topbar-left' : ''}`}>
           <div className="language-toggle" role="group" aria-label="Language toggle">
             <button
@@ -494,26 +882,31 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
           <ThemeToggle theme={theme} setTheme={setTheme} language={language} />
         </div>
         <div className={`right-topbar-right ${mobileOnly ? 'mobile-chat-topbar-right' : ''}`}>
-          <div className="account-chip" role="button" tabIndex={0}>
+          <button
+            className="account-chip"
+            type="button"
+            onClick={openAccountSheet}
+          >
             <span className="account-chip-avatar" aria-hidden="true">
-              {accountEmail ? accountEmail.slice(0, 1).toUpperCase() : 'E'}
+              {userEmail ? userEmail.slice(0, 1).toUpperCase() : 'E'}
             </span>
             <div className="account-chip-copy">
-              {accountEmail ? (
-                <span className="account-chip-email">{accountEmail}</span>
+              {userEmail ? (
+                <span className="account-chip-email">{userEmail}</span>
               ) : (
                 <div className="account-chip-actions">
                   <span className="account-chip-action">{copy.login}</span>
                 </div>
               )}
             </div>
-          </div>
+          </button>
         </div>
       </div>
       <div className={`right-panel ${mobileOnly ? 'mobile-chat-panel' : ''}`}>
       <div className={`chat-stage ${mobileOnly ? 'mobile-chat-stage' : ''}`}>
         <div className="chat-sprite-track" ref={chatSpriteTrackRef} aria-hidden="true">
           <div className="sprite-shell facing-right" ref={chatSpriteShellRef}>
+            {spriteBubbleText ? <div className="sprite-bubble">{spriteBubbleText}</div> : null}
             <div className={`sprite-avatar ${spriteMode}`} />
           </div>
         </div>
@@ -547,6 +940,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
           {!mobileOnly ? (
             <div className="input-sprite-track" ref={inputSpriteTrackRef} aria-hidden="true">
               <div className="sprite-shell facing-left" ref={inputSpriteShellRef}>
+                {spriteBubbleText ? <div className="sprite-bubble">{spriteBubbleText}</div> : null}
                 <div className={`sprite-avatar ${spriteMode}`} />
               </div>
             </div>
@@ -586,6 +980,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
               }}
             />
             <input
+              ref={textInputRef}
               type="text"
               value={inputValue}
               placeholder={copy.placeholder}
@@ -593,11 +988,17 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
                 setInputValue(event.target.value)
                 boost()
               }}
-              onBlur={cruise}
+              onBlur={() => {
+                cruise()
+                window.setTimeout(snapViewportToTop, 90)
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   const query = inputValue
                   setInputValue('')
+                  if (mobileOnly) {
+                    textInputRef.current?.blur()
+                  }
                   sendQuery(query)
                 }
               }}
@@ -636,6 +1037,9 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
           onClick={() => {
             const query = inputValue
             setInputValue('')
+            if (mobileOnly) {
+              textInputRef.current?.blur()
+            }
             sendQuery(query)
           }}
         >
@@ -643,7 +1047,97 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         </button>
       </div>
       </div>
+      {accountSheetOpen ? (
+        <div className="account-sheet-backdrop" onClick={() => setAccountSheetOpen(false)}>
+          <div className="account-sheet" onClick={(event) => event.stopPropagation()}>
+            <div className="account-sheet-title">{copy.loginTitle}</div>
+            {userEmail ? (
+              <>
+                <div className="account-sheet-current">{userEmail}</div>
+                <div className="account-sheet-actions-row">
+                  <button type="button" className="account-sheet-btn secondary" onClick={() => setAccountSheetOpen(false)}>
+                    {copy.cancel}
+                  </button>
+                  <button type="button" className="account-sheet-btn primary" onClick={logout}>
+                    {copy.logout}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="account-sheet-inputs">
+                  <input
+                    className="account-sheet-input"
+                    type="email"
+                    value={emailDraft}
+                    placeholder={copy.emailPlaceholder}
+                    disabled={codeSent}
+                    onChange={(event) => setEmailDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !codeSent) {
+                        sendVerificationCode()
+                      }
+                    }}
+                  />
+                  {codeSent ? (
+                    <input
+                      className="account-sheet-input account-sheet-code-input"
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={codeDraft}
+                      placeholder={copy.codePlaceholder}
+                      autoFocus
+                      onChange={(event) => setCodeDraft(event.target.value.replace(/\D/g, ''))}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          verifyAndLogin()
+                        }
+                      }}
+                    />
+                  ) : null}
+                </div>
+                {authError ? (
+                  <div className="account-sheet-error">{authError}</div>
+                ) : null}
+                <div className="account-sheet-actions-row">
+                  <button type="button" className="account-sheet-btn secondary" onClick={() => setAccountSheetOpen(false)}>
+                    {copy.cancel}
+                  </button>
+                  {codeSent ? (
+                    <button
+                      type="button"
+                      className="account-sheet-btn primary"
+                      disabled={authLoading || codeDraft.length !== 6}
+                      onClick={verifyAndLogin}
+                    >
+                      {authLoading ? '...' : copy.confirmLogin}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="account-sheet-btn primary"
+                      disabled={authLoading || !emailDraft.trim()}
+                      onClick={sendVerificationCode}
+                    >
+                      {authLoading ? '...' : copy.sendCode}
+                    </button>
+                  )}
+                </div>
+                {codeSent ? (
+                  <button
+                    type="button"
+                    className="account-sheet-back-link"
+                    onClick={() => { setCodeSent(false); setCodeDraft(''); setAuthError('') }}
+                  >
+                    {copy.differentEmail}
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
-

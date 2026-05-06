@@ -9,14 +9,23 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi import Query
+from fastapi import FastAPI, HTTPException, Header
+from fastapi import Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
+import auth
 from rag import DEFAULT_TOP_K, chat, ingest_document, search
-from store import init_db, sync_chroma_index
+from store import (
+    create_user,
+    find_user_by_email,
+    find_user_by_id,
+    get_chat_history,
+    init_db,
+    save_chat_message,
+    sync_chroma_index,
+)
 from providers import ocr_image_data_url, translate_text, validate_provider_env
 from cache_store import get_json as cache_get_json, redis_status, set_json as cache_set_json
 from task_broker import get_job_status, publish_ingest_job, rabbitmq_status, start_ingest_worker
@@ -85,6 +94,25 @@ class OcrImageRequest(BaseModel):
     image_data_url: str
     filename: str | None = None
     prompt: str | None = None
+
+
+class SendCodeRequest(BaseModel):
+    email: str
+
+
+class VerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+def get_current_user(authorization: str | None = Header(None)) -> dict | None:
+    if not authorization:
+        return None
+    token = authorization.removeprefix("Bearer ").strip()
+    user_id = auth.verify_token(token)
+    if user_id is None:
+        return None
+    return find_user_by_id(user_id)
 
 
 def format_market_cap(value: int | float | None) -> str:
@@ -626,6 +654,47 @@ def health() -> dict:
     }
 
 
+@app.post("/auth/send-code")
+def send_code(req: SendCodeRequest) -> dict:
+    email = (req.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    code = auth.generate_code()
+    auth.store_code(email, code)
+    auth.send_verification_email(email, code)
+    return {"ok": True}
+
+
+@app.post("/auth/verify-code")
+def verify_code(req: VerifyCodeRequest) -> dict:
+    email = (req.email or "").strip().lower()
+    code = (req.code or "").strip()
+    if not email or not code:
+        raise HTTPException(status_code=400, detail="Email and code are required")
+    if not auth.verify_code(email, code):
+        raise HTTPException(status_code=401, detail="Invalid or expired code")
+    user = find_user_by_email(email)
+    if user is None:
+        user = create_user(email)
+    token = auth.create_token(user["id"])
+    return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+
+
+@app.get("/auth/me")
+def auth_me(user: dict | None = Depends(get_current_user)) -> dict:
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"user": {"id": user["id"], "email": user["email"]}}
+
+
+@app.get("/chat/history")
+def chat_history(user: dict | None = Depends(get_current_user)) -> dict:
+    if user is None:
+        return {"messages": []}
+    messages = get_chat_history(user["id"])
+    return {"messages": messages}
+
+
 @app.post("/ingest")
 def ingest(req: IngestRequest, queue: bool = Query(False)) -> dict:
     try:
@@ -660,9 +729,15 @@ def search_route(req: SearchRequest) -> dict:
 
 
 @app.post("/chat")
-def chat_route(req: ChatRequest) -> dict:
+def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) -> dict:
     try:
-        return chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
+        result = chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
+        if user:
+            save_chat_message(user["id"], "user", req.query)
+            save_chat_message(
+                user["id"], "bot", result.get("answer", ""), query=req.query
+            )
+        return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

@@ -6,7 +6,6 @@ from store import insert_chunks, insert_document, search_chunks
 
 DEFAULT_TOP_K = 5
 FALLBACK_SCORE_THRESHOLD = 0.35
-RAG_PREFIX = "已经查询到最新更新的知识库内容整理："
 WEB_CHUNK_SIZE = 900
 PDF_CHUNK_SIZE = 1100
 TABLE_CHUNK_SIZE = 1400
@@ -32,21 +31,6 @@ def normalize_document_text(text: str) -> str:
     return "\n".join(normalized_lines).strip()
 
 
-def is_heading(line: str) -> bool:
-    if not line:
-        return False
-    if line.startswith(("#", "##", "###")):
-        return True
-    if re.match(r"^(\d+(\.\d+)*|[IVXLC]+)[\).\s-]+", line):
-        return True
-    if len(line) <= 90 and line.endswith(":"):
-        return True
-    words = line.split()
-    if 1 <= len(words) <= 12 and len(line) <= 90 and line == line.title():
-        return True
-    return False
-
-
 def is_list_item(line: str) -> bool:
     return bool(re.match(r"^([-*•]|\d+[\.\)]|[a-zA-Z][\.\)])\s+", line))
 
@@ -65,6 +49,14 @@ def detect_chunk_size(source_type: str | None, url: str | None) -> int:
     return WEB_CHUNK_SIZE
 
 
+def parse_heading_level(line: str) -> int:
+    """Return heading level 1-6 for markdown #-style headings, 0 otherwise."""
+    m = re.match(r"^(#{1,6})\s+(.+)", line)
+    if m:
+        return len(m.group(1))
+    return 0
+
+
 def split_long_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     text = text.strip()
     if not text:
@@ -72,7 +64,7 @@ def split_long_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     if len(text) <= chunk_size:
         return [text]
 
-    sentences = re.split(r"(?<=[.!?。！？])\s+", text)
+    sentences = re.split(r"(?<=[.!?。！？])\s*", text)
     chunks: list[str] = []
     current = ""
 
@@ -124,50 +116,20 @@ def split_table_block(block: str, chunk_size: int) -> list[str]:
     return chunks
 
 
-def structure_blocks(text: str) -> list[tuple[str, str]]:
-    lines = normalize_document_text(text).split("\n")
-    blocks: list[tuple[str, str]] = []
-    current_lines: list[str] = []
-    current_kind = "paragraph"
-    pending_heading: str | None = None
-
-    def flush() -> None:
-        nonlocal current_lines, current_kind, pending_heading
-        if not current_lines:
-            return
-        body = "\n".join(current_lines).strip()
-        if pending_heading:
-            body = f"{pending_heading}\n{body}"
-            pending_heading = None
-        if body:
-            blocks.append((current_kind, body))
-        current_lines = []
-        current_kind = "paragraph"
-
+def _classify_block(lines: list[str]) -> str:
+    """Classify a block of lines as table, list, or paragraph."""
     for line in lines:
-        if not line:
-            flush()
-            continue
-
-        if is_heading(line):
-            flush()
-            pending_heading = line
-            continue
-
-        kind = "paragraph"
         if is_table_row(line):
-            kind = "table"
-        elif is_list_item(line):
-            kind = "list"
+            return "table"
+        if is_list_item(line):
+            return "list"
+    return "paragraph"
 
-        if current_lines and kind != current_kind:
-            flush()
 
-        current_kind = kind
-        current_lines.append(line)
-
-    flush()
-    return blocks
+def _chunk_block(block_text: str, kind: str, chunk_size: int, overlap: int) -> list[str]:
+    if kind == "table":
+        return split_table_block(block_text, TABLE_CHUNK_SIZE)
+    return split_long_text(block_text, chunk_size, overlap)
 
 
 def chunk_text(
@@ -176,36 +138,116 @@ def chunk_text(
     source_type: str | None = None,
     url: str | None = None,
     overlap: int = CHUNK_OVERLAP,
-) -> list[str]:
+) -> list[dict]:
+    """Split text into chunks, each with a heading_path for context.
+
+    Returns list of dicts: {"text": str, "heading_path": str}
+    Heading boundaries (# ## ###) are used as primary chunk boundaries.
+    Within a section, tables and lists are detected and split separately.
+    """
     if overlap < 0:
         raise ValueError("overlap must be non-negative")
 
-    blocks = structure_blocks(text)
-    if not blocks:
+    base_chunk_size = detect_chunk_size(source_type=source_type, url=url)
+    lines = normalize_document_text(text).split("\n")
+
+    # Build sections from heading hierarchy
+    sections: list[tuple[str, str]] = []  # (heading_path, section_text)
+    heading_stack: list[str] = []
+    section_lines: list[str] = []
+
+    def flush_section() -> None:
+        nonlocal section_lines
+        if not section_lines:
+            return
+        path = " > ".join(heading_stack) if heading_stack else ""
+        body = "\n".join(section_lines).strip()
+        if body:
+            sections.append((path, body))
+        section_lines = []
+
+    for line in lines:
+        level = parse_heading_level(line) if line else 0
+        if level > 0:
+            flush_section()
+            while len(heading_stack) >= level:
+                heading_stack.pop()
+            heading_text = re.sub(r"^#+\s+", "", line).strip()
+            heading_stack.append(heading_text)
+            section_lines = [line]
+        else:
+            section_lines.append(line)
+
+    flush_section()
+
+    if not sections:
         return []
 
-    base_chunk_size = detect_chunk_size(source_type=source_type, url=url)
-    chunks: list[str] = []
+    # Within each section, detect block types and split
+    results: list[dict] = []
+    BLANK_RE = re.compile(r"^\s*$")
 
-    for kind, block in blocks:
-        if kind == "table":
-            chunks.extend(split_table_block(block, TABLE_CHUNK_SIZE))
-            continue
-        chunks.extend(split_long_text(block, base_chunk_size, overlap))
+    for heading_path, section_text in sections:
+        section_lines = section_text.split("\n")
+        blocks: list[tuple[str, str]] = []  # (kind, text)
+        current_kind = "paragraph"
+        current_lines: list[str] = []
+        pending_heading: str | None = None
 
-    return [chunk.strip() for chunk in chunks if chunk.strip()]
+        for line in section_lines:
+            if not line.strip():
+                if current_lines:
+                    if pending_heading:
+                        blocks.append(
+                            (current_kind, f"{pending_heading}\n" + "\n".join(current_lines).strip())
+                        )
+                        pending_heading = None
+                    else:
+                        blocks.append((current_kind, "\n".join(current_lines).strip()))
+                    current_lines = []
+                current_kind = "paragraph"
+                continue
 
+            sub_level = parse_heading_level(line)
+            if sub_level > 0:
+                if current_lines:
+                    body = "\n".join(current_lines).strip()
+                    if pending_heading:
+                        body = f"{pending_heading}\n{body}"
+                    if body:
+                        blocks.append((current_kind, body))
+                    pending_heading = None
+                    current_lines = []
+                pending_heading = line
+                current_kind = "paragraph"
+                continue
 
-def append_hit_score(answer: str, score: float) -> str:
-    safe_score = max(0.0, score)
-    return f"{answer}\n\n命中分数：{safe_score:.3f}"
+            kind = _classify_block([line])
+            if current_lines and kind != current_kind:
+                body = "\n".join(current_lines).strip()
+                if pending_heading:
+                    body = f"{pending_heading}\n{body}"
+                    pending_heading = None
+                if body:
+                    blocks.append((current_kind, body))
+                current_lines = []
+            current_kind = kind
+            current_lines.append(line)
 
+        if current_lines:
+            body = "\n".join(current_lines).strip()
+            if pending_heading:
+                body = f"{pending_heading}\n{body}"
+            if body:
+                blocks.append((current_kind, body))
 
-def prepend_rag_prefix(answer: str) -> str:
-    clean = answer.strip()
-    if clean.startswith(RAG_PREFIX):
-        return clean
-    return f"{RAG_PREFIX}\n\n{clean}"
+        for kind, block_text in blocks:
+            for sub_chunk in _chunk_block(block_text, kind, base_chunk_size, overlap):
+                sub_chunk = sub_chunk.strip()
+                if sub_chunk:
+                    results.append({"text": sub_chunk, "heading_path": heading_path})
+
+    return results
 
 
 def build_sources(hits: list[dict]) -> list[dict]:
@@ -262,11 +304,19 @@ def ingest_document(
         language=language,
         summary=summary,
     )
-    chunks = chunk_text(content, source_type=source_type, url=url)
-    if not chunks:
+    chunk_dicts = chunk_text(content, source_type=source_type, url=url)
+    if not chunk_dicts:
         return {"document_id": doc_id, "chunks": 0}
-    embeddings = embed_texts(chunks)
-    count = insert_chunks(document_id=doc_id, chunks=chunks, embeddings=embeddings)
+
+    chunk_texts = [c["text"] for c in chunk_dicts]
+    heading_paths = [c["heading_path"] for c in chunk_dicts]
+    embeddings = embed_texts(chunk_texts)
+    count = insert_chunks(
+        document_id=doc_id,
+        chunks=chunk_texts,
+        embeddings=embeddings,
+        heading_paths=heading_paths,
+    )
     return {
         "document_id": doc_id,
         "chunks": count,
@@ -278,9 +328,35 @@ def ingest_document(
     }
 
 
-def search(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
+def search(
+    query: str,
+    top_k: int = DEFAULT_TOP_K,
+    language: str | None = None,
+) -> list[dict]:
     query_vector = embed_texts([query])[0]
-    return search_chunks(query_embedding=query_vector, top_k=top_k)
+    return search_chunks(query_embedding=query_vector, top_k=top_k, language=language)
+
+
+def _detect_query_language(query: str) -> str | None:
+    """Return 'zh' if query contains Chinese, 'en' if mostly ASCII, else None."""
+    zh_chars = len(re.findall(r"[一-鿿]", query))
+    if zh_chars >= 2:
+        return "zh"
+    if zh_chars == 0 and len(query) > 0:
+        return "en"
+    return None
+
+
+def _build_context(hits: list[dict]) -> str:
+    """Build RAG context string with heading paths and source info."""
+    parts: list[str] = []
+    for i, h in enumerate(hits):
+        heading = h.get("heading_path", "")
+        title = h.get("title", "") or ""
+        heading_info = f" > {heading}" if heading else ""
+        header = f"[{i + 1}] {title}{heading_info}"
+        parts.append(f"{header}\n{h['content']}")
+    return "\n\n".join(parts)
 
 
 def chat(query: str, top_k: int = DEFAULT_TOP_K, use_rag: bool = True) -> dict:
@@ -288,15 +364,17 @@ def chat(query: str, top_k: int = DEFAULT_TOP_K, use_rag: bool = True) -> dict:
         answer = generate_general_answer(query=query)
         return {"answer": answer, "contexts": [], "sources": [], "mode": "general"}
 
-    hits = search(query=query, top_k=top_k)
-    contexts = [h["content"] for h in hits]
+    lang = _detect_query_language(query)
+    hits = search(query=query, top_k=top_k, language=lang)
     top_score = hits[0]["score"] if hits else -1.0
     sources = build_sources(hits)
 
     if top_score < FALLBACK_SCORE_THRESHOLD:
-        answer = append_hit_score(generate_general_answer(query=query), top_score)
+        answer = generate_general_answer(query=query)
+        answer = f"{answer}\n\n命中分数：{top_score:.3f}"
         return {"answer": answer, "contexts": hits, "sources": sources, "mode": "general"}
 
-    answer = prepend_rag_prefix(generate_answer(query=query, contexts=contexts))
-    answer = append_hit_score(answer, top_score)
+    context_text = _build_context(hits)
+    answer = generate_answer(query=query, contexts=[context_text])
+    answer = f"{answer}\n\n命中分数：{top_score:.3f}"
     return {"answer": answer, "contexts": hits, "sources": sources, "mode": "rag"}
