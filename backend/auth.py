@@ -74,8 +74,13 @@ def verify_code(email: str, code: str) -> bool:
 def send_verification_email(email: str, code: str) -> None:
     api_key = os.getenv("RESEND_API_KEY", "").strip()
     if api_key:
-        import resend
+        try:
+            import resend
+        except ImportError:
+            print("resend module not installed, falling back to dev mode")
+            api_key = ""
 
+    if api_key:
         resend.api_key = api_key
         sender = os.getenv("RESEND_SENDER", "onboarding@resend.dev")
         try:

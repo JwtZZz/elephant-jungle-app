@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus
 
 import httpx
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Request, Response
 from fastapi import Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -105,10 +105,17 @@ class VerifyCodeRequest(BaseModel):
     code: str
 
 
-def get_current_user(authorization: str | None = Header(None)) -> dict | None:
-    if not authorization:
+def get_current_user(
+    request: Request,
+    authorization: str | None = Header(None),
+) -> dict | None:
+    token = None
+    if authorization:
+        token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        token = request.cookies.get("elephant_token")
+    if not token:
         return None
-    token = authorization.removeprefix("Bearer ").strip()
     user_id = auth.verify_token(token)
     if user_id is None:
         return None
@@ -666,7 +673,7 @@ def send_code(req: SendCodeRequest) -> dict:
 
 
 @app.post("/auth/verify-code")
-def verify_code(req: VerifyCodeRequest) -> dict:
+def verify_code(req: VerifyCodeRequest, response: Response) -> dict:
     email = (req.email or "").strip().lower()
     code = (req.code or "").strip()
     if not email or not code:
@@ -677,7 +684,21 @@ def verify_code(req: VerifyCodeRequest) -> dict:
     if user is None:
         user = create_user(email)
     token = auth.create_token(user["id"])
+    response.set_cookie(
+        key="elephant_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=7 * 24 * 3600,
+        path="/",
+    )
     return {"token": token, "user": {"id": user["id"], "email": user["email"]}}
+
+
+@app.post("/auth/logout")
+def logout(response: Response) -> dict:
+    response.delete_cookie(key="elephant_token", path="/")
+    return {"ok": True}
 
 
 @app.get("/auth/me")
@@ -733,10 +754,7 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
     try:
         result = chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
         if user:
-            save_chat_message(user["id"], "user", req.query)
-            save_chat_message(
-                user["id"], "bot", result.get("answer", ""), query=req.query
-            )
+            save_chat_message(user["id"], req.query, result.get("answer", ""))
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -816,23 +834,39 @@ WHALE_FEED_TTL = 10
 WHALE_FEED_DEFAULT_LIMIT = 24
 WHALE_FEED_CACHE: dict[str, dict] = {}
 WHALE_FEED_REDIS_KEY = "whales:feed:v1"
+ARKHAM_API_KEY = os.getenv("ARKHAM_API_KEY", "").strip()
+ARKHAM_TRANSFERS_URL = os.getenv("ARKHAM_TRANSFERS_URL", "https://api.arkm.com/transfers").strip()
+ARKHAM_WHALE_FROM = os.getenv(
+    "ARKHAM_WHALE_FROM",
+    "BlackRock,Fidelity,Grayscale,Bitwise,Coinbase Prime,Wintermute,Jump Trading,FalconX,Circle,Tether,Ark/21Shares",
+).strip()
+ARKHAM_WHALE_TO = os.getenv(
+    "ARKHAM_WHALE_TO",
+    "type:cex,deposit:binance,deposit:coinbase,deposit:okx,deposit:kraken",
+).strip()
+ARKHAM_WHALE_CHAINS = os.getenv(
+    "ARKHAM_WHALE_CHAINS",
+    "bitcoin,ethereum,solana,bsc,tron",
+).strip()
+ARKHAM_WHALE_TIME_LAST = os.getenv("ARKHAM_WHALE_TIME_LAST", "24h").strip()
+ARKHAM_WHALE_USD_GTE = os.getenv("ARKHAM_WHALE_USD_GTE", "1000000").strip()
 WHALE_FEED_SEED = [
-    {"chain": "BTC", "chainTone": "btc", "from": "BlackRock: IBIT Bitcoin ETF", "fromAddress": "bc1q9xj...7qk2", "to": "Coinbase Prime Deposit", "toAddress": "3QJmV3...eMcz", "amount": "300 BTC", "usd": "$23.28M", "direction": "outflow", "minutesAgo": 8},
-    {"chain": "BTC", "chainTone": "btc", "from": "Coinbase Prime: Custody", "fromAddress": "bc1qcp...8v4h", "to": "BlackRock: IBIT Bitcoin ETF", "toAddress": "bc1qa8...0nkp", "amount": "300 BTC", "usd": "$23.28M", "direction": "inflow", "minutesAgo": 9},
-    {"chain": "ETH", "chainTone": "eth", "from": "BlackRock: ETHA Ethereum ETF", "fromAddress": "0x3a8F...41cE", "to": "Coinbase Prime Deposit", "toAddress": "0x6F2b...9D11", "amount": "5.738K ETH", "usd": "$13.38M", "direction": "outflow", "minutesAgo": 12},
-    {"chain": "BTC", "chainTone": "btc", "from": "Fidelity: Wise Origin BTC", "fromAddress": "bc1qm0...2pp7", "to": "Coinbase Prime: Custody", "toAddress": "bc1qcp...8v4h", "amount": "187 BTC", "usd": "$14.51M", "direction": "inflow", "minutesAgo": 16},
-    {"chain": "SOL", "chainTone": "sol", "from": "Wintermute Market Making", "fromAddress": "6pQ9g...Lh9Qz", "to": "Binance Hot Wallet 12", "toAddress": "8f3K2...p2MdX", "amount": "92.4K SOL", "usd": "$12.07M", "direction": "inflow", "minutesAgo": 18},
-    {"chain": "USDT", "chainTone": "usdt", "from": "Tether Treasury", "fromAddress": "TX7uK...4sE91", "to": "Cumberland DRW", "toAddress": "TG1oL...K0fw3", "amount": "20.0M USDT", "usd": "$20.00M", "direction": "inflow", "minutesAgo": 21},
-    {"chain": "BTC", "chainTone": "btc", "from": "Grayscale: GBTC ETF", "fromAddress": "bc1qgl...9ut2", "to": "Coinbase Prime Deposit (+2)", "toAddress": "1BoatS...tpyT", "amount": "141 BTC", "usd": "$10.93M", "direction": "outflow", "minutesAgo": 24},
-    {"chain": "ETH", "chainTone": "eth", "from": "Jump Trading 0x9c1", "fromAddress": "0x9c12...5a1B", "to": "Kraken Deposit Wallet", "toAddress": "0x72d4...aC33", "amount": "3.904K ETH", "usd": "$9.08M", "direction": "outflow", "minutesAgo": 27},
-    {"chain": "BNB", "chainTone": "bnb", "from": "Binance Cold Wallet 3", "fromAddress": "0xb6A7...821d", "to": "Wintermute BSC Router", "toAddress": "0xA181...a12C", "amount": "14.2K BNB", "usd": "$8.81M", "direction": "outflow", "minutesAgo": 31},
-    {"chain": "BTC", "chainTone": "btc", "from": "Ark/21Shares ARKB", "fromAddress": "bc1qzk...6c8n", "to": "Coinbase Prime: Custody", "toAddress": "bc1qcp...8v4h", "amount": "119 BTC", "usd": "$9.19M", "direction": "inflow", "minutesAgo": 35},
-    {"chain": "USDC", "chainTone": "usdc", "from": "Circle Treasury", "fromAddress": "0xC1rc...3E88", "to": "Coinbase Institutional", "toAddress": "0x78C4...f0B2", "amount": "15.0M USDC", "usd": "$15.00M", "direction": "inflow", "minutesAgo": 39},
-    {"chain": "ETH", "chainTone": "eth", "from": "Coinbase Prime: Custody", "fromAddress": "0x6F2b...9D11", "to": "BlackRock: ETHA Ethereum ETF", "toAddress": "0x3a8F...41cE", "amount": "2.865K ETH", "usd": "$6.71M", "direction": "inflow", "minutesAgo": 43},
-    {"chain": "SOL", "chainTone": "sol", "from": "FalconX Prime", "fromAddress": "9JpQw...12LrM", "to": "OKX Solana Deposit", "toAddress": "4TrsE...Qm2wP", "amount": "48.0K SOL", "usd": "$6.18M", "direction": "outflow", "minutesAgo": 47},
-    {"chain": "BTC", "chainTone": "btc", "from": "Bitwise ETF Reserve", "fromAddress": "bc1qbt...8ka3", "to": "Coinbase Prime Deposit", "toAddress": "3QJmV3...eMcz", "amount": "78 BTC", "usd": "$6.04M", "direction": "outflow", "minutesAgo": 52},
-    {"chain": "USDT", "chainTone": "usdt", "from": "Alameda Recovery Wallet", "fromAddress": "TX89A...pQ3r7", "to": "Binance Deposit Wallet", "toAddress": "TY12F...jL0wE", "amount": "12.5M USDT", "usd": "$12.50M", "direction": "outflow", "minutesAgo": 56},
-    {"chain": "BNB", "chainTone": "bnb", "from": "Jump Cross-chain Treasury", "fromAddress": "0xB2d1...f8Ce", "to": "Binance Hot Wallet 7", "toAddress": "0x61A4...7d2E", "amount": "8.4K BNB", "usd": "$5.22M", "direction": "inflow", "minutesAgo": 61},
+    {"chain": "BTC", "chainTone": "btc", "from": "BlackRock: IBIT Bitcoin ETF", "fromAddress": "bc1q9xj3m4w7l8hnc5r0u2t6v9p3s7qk2dw8c4n6y", "to": "Coinbase Prime Deposit", "toAddress": "3QJmV3qfvL9SuYo34YihAf3sRCW3qSinyC", "amount": "300 BTC", "usd": "$23.28M", "direction": "outflow", "minutesAgo": 8},
+    {"chain": "BTC", "chainTone": "btc", "from": "Coinbase Prime: Custody", "fromAddress": "bc1qcp6w80v2h4n7m3t5r8k1y9p4z7s2x8v4h0q6lu", "to": "BlackRock: IBIT Bitcoin ETF", "toAddress": "bc1qa8w3n5t7y0kpc2u4m8r6s1h9q0nkp5z7d4v2x", "amount": "300 BTC", "usd": "$23.28M", "direction": "inflow", "minutesAgo": 9},
+    {"chain": "ETH", "chainTone": "eth", "from": "BlackRock: ETHA Ethereum ETF", "fromAddress": "0x3a8F1C4Eaa73bD2F64c80A1e3F35bc7d9A6d41cE", "to": "Coinbase Prime Deposit", "toAddress": "0x6F2b8D1F9d112AbC4c7E9F0D23A6b18f8B3a9D11", "amount": "5.738K ETH", "usd": "$13.38M", "direction": "outflow", "minutesAgo": 12},
+    {"chain": "BTC", "chainTone": "btc", "from": "Fidelity: Wise Origin BTC", "fromAddress": "bc1qm0n4u7p2r8s5w3x1t6y9z0a4h2pp7k8v5m3n6q", "to": "Coinbase Prime: Custody", "toAddress": "bc1qcp6w80v2h4n7m3t5r8k1y9p4z7s2x8v4h0q6lu", "amount": "187 BTC", "usd": "$14.51M", "direction": "inflow", "minutesAgo": 16},
+    {"chain": "SOL", "chainTone": "sol", "from": "Wintermute Market Making", "fromAddress": "6pQ9g9Yg4Lh9QzR7kV3xT2nP6sUa1mBc8dFe0GhJ2kLm", "to": "Binance Hot Wallet 12", "toAddress": "8f3K2nAp2MdX7qRs9TuV1wX2yZa3Bc4De5Fg6Hi7JkLm", "amount": "92.4K SOL", "usd": "$12.07M", "direction": "inflow", "minutesAgo": 18},
+    {"chain": "USDT", "chainTone": "usdt", "from": "Tether Treasury", "fromAddress": "TX7uK4x92sE91nQw3Er5Ty7Ui9Op1As3Df5Gh7Jk9Lm2", "to": "Cumberland DRW", "toAddress": "TG1oLK0fw3mNp6Qr8St0Uv2Wx4Yz6Ab8Cd0Ef2Gh4Jk6", "amount": "20.0M USDT", "usd": "$20.00M", "direction": "inflow", "minutesAgo": 21},
+    {"chain": "BTC", "chainTone": "btc", "from": "Grayscale: GBTC ETF", "fromAddress": "bc1qgl7m9ut2x4v6n8b0c2d4e6f8g0h2j4k6l8m0n2p", "to": "Coinbase Prime Deposit (+2)", "toAddress": "1BoatSLRHtKNngkdXEeobR76b53LETtpyT", "amount": "141 BTC", "usd": "$10.93M", "direction": "outflow", "minutesAgo": 24},
+    {"chain": "ETH", "chainTone": "eth", "from": "Jump Trading 0x9c1", "fromAddress": "0x9c12dA58cEf41bA0D93e7c11A20Fdc29b84f5a1B", "to": "Kraken Deposit Wallet", "toAddress": "0x72d4B1aC331f2E8c94D5A7b0Ef1234Ab56Cd7eF8", "amount": "3.904K ETH", "usd": "$9.08M", "direction": "outflow", "minutesAgo": 27},
+    {"chain": "BNB", "chainTone": "bnb", "from": "Binance Cold Wallet 3", "fromAddress": "0xb6A7821d4f8b7c9d0e1f23456789abcDEF012345", "to": "Wintermute BSC Router", "toAddress": "0xA1812a12C4d5e6f708192aBcDef1234567890aBC", "amount": "14.2K BNB", "usd": "$8.81M", "direction": "outflow", "minutesAgo": 31},
+    {"chain": "BTC", "chainTone": "btc", "from": "Ark/21Shares ARKB", "fromAddress": "bc1qzk5r6c8n1m3p5t7v9x2z4a6c8e0g2i4k6m8o0q2", "to": "Coinbase Prime: Custody", "toAddress": "bc1qcp6w80v2h4n7m3t5r8k1y9p4z7s2x8v4h0q6lu", "amount": "119 BTC", "usd": "$9.19M", "direction": "inflow", "minutesAgo": 35},
+    {"chain": "USDC", "chainTone": "usdc", "from": "Circle Treasury", "fromAddress": "0xC1rc33E88765aa4bf9091CdEf23456789AbCdEf0", "to": "Coinbase Institutional", "toAddress": "0x78C4f0B28a61Cd73eF9421abCDef4567890aBcD1", "amount": "15.0M USDC", "usd": "$15.00M", "direction": "inflow", "minutesAgo": 39},
+    {"chain": "ETH", "chainTone": "eth", "from": "Coinbase Prime: Custody", "fromAddress": "0x6F2b8D1F9d112AbC4c7E9F0D23A6b18f8B3a9D11", "to": "BlackRock: ETHA Ethereum ETF", "toAddress": "0x3a8F1C4Eaa73bD2F64c80A1e3F35bc7d9A6d41cE", "amount": "2.865K ETH", "usd": "$6.71M", "direction": "inflow", "minutesAgo": 43},
+    {"chain": "SOL", "chainTone": "sol", "from": "FalconX Prime", "fromAddress": "9JpQw12LrM4nP6qR8sT0uV2wX4yZ6aBc8De0Fg2Hi4Jk", "to": "OKX Solana Deposit", "toAddress": "4TrsEQm2wP5rS7tU9vW1xY3zA5bC7dE9fG1hJ3kL5mN", "amount": "48.0K SOL", "usd": "$6.18M", "direction": "outflow", "minutesAgo": 47},
+    {"chain": "BTC", "chainTone": "btc", "from": "Bitwise ETF Reserve", "fromAddress": "bc1qbt8ka3m5p7r9t1v3x5z7b9d1f3h5j7l9n1p3r5t", "to": "Coinbase Prime Deposit", "toAddress": "3QJmV3qfvL9SuYo34YihAf3sRCW3qSinyC", "amount": "78 BTC", "usd": "$6.04M", "direction": "outflow", "minutesAgo": 52},
+    {"chain": "USDT", "chainTone": "usdt", "from": "Alameda Recovery Wallet", "fromAddress": "TX89ApQ3r7sT9uV1wX3yZ5aBc7De9Fg1Hi3Jk5Lm7No9", "to": "Binance Deposit Wallet", "toAddress": "TY12FjL0wE2rT4vX6zA8cD0fG2iJ4lN6pQ8sU0wY2aB4", "amount": "12.5M USDT", "usd": "$12.50M", "direction": "outflow", "minutesAgo": 56},
+    {"chain": "BNB", "chainTone": "bnb", "from": "Jump Cross-chain Treasury", "fromAddress": "0xB2d1f8Ce90aBcD12eF34567890abCDef12345678", "to": "Binance Hot Wallet 7", "toAddress": "0x61A47d2Ef890abC1234567890DefABc123456789", "amount": "8.4K BNB", "usd": "$5.22M", "direction": "inflow", "minutesAgo": 61},
 ]
 
 
@@ -905,6 +939,248 @@ def _meme_banner_score(pair: dict, boost_item: dict | None) -> float:
     )
 
 
+def _coerce_float(value) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _first_truthy(*values):
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _normalize_whale_chain(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    mapping = {
+        "bitcoin": "BTC",
+        "btc": "BTC",
+        "ethereum": "ETH",
+        "eth": "ETH",
+        "solana": "SOL",
+        "sol": "SOL",
+        "bsc": "BNB",
+        "bnb": "BNB",
+        "binance-smart-chain": "BNB",
+        "tron": "USDT",
+        "trc20": "USDT",
+        "usdt": "USDT",
+        "usdc": "USDC",
+    }
+    return mapping.get(normalized, (value or "--").upper())
+
+
+def _normalize_whale_tone(value: str | None) -> str:
+    normalized = _normalize_whale_chain(value).lower()
+    mapping = {
+        "btc": "btc",
+        "eth": "eth",
+        "sol": "sol",
+        "bnb": "bnb",
+        "usdt": "usdt",
+        "usdc": "usdc",
+    }
+    return mapping.get(normalized, normalized or "btc")
+
+
+def _format_whale_amount(value, symbol: str) -> str:
+    amount = _coerce_float(value)
+    token = (symbol or "--").strip().upper()
+    if amount is None:
+        return f"-- {token}".strip()
+    if amount >= 1_000_000:
+        text = f"{amount / 1_000_000:.2f}M"
+    elif amount >= 1_000:
+        text = f"{amount / 1_000:.3f}K".rstrip("0").rstrip(".")
+    elif amount >= 1:
+        text = f"{amount:,.3f}".rstrip("0").rstrip(".")
+    else:
+        text = f"{amount:.6f}".rstrip("0").rstrip(".")
+    return f"{text} {token}".strip()
+
+
+def _short_wallet(value: str | None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "--"
+    if "..." in text or len(text) <= 14:
+        return text
+    return f"{text[:6]}...{text[-4:]}"
+
+
+def _clean_wallet(value: str | None) -> str:
+    text = str(value or "").strip()
+    return text or "--"
+
+
+def _minutes_ago(value) -> int:
+    numeric = _coerce_float(value)
+    if numeric is None:
+        return 0
+    if numeric > 10_000_000_000:
+        numeric /= 1000
+    if numeric > 1_000_000_000:
+        return max(1, int((time.time() - numeric) / 60))
+    return max(1, int(numeric))
+
+
+def _label_or_wallet(label: str | None, address: str | None) -> str:
+    text = str(label or "").strip()
+    return text or _short_wallet(address)
+
+
+def _looks_like_exchange(label: str) -> bool:
+    normalized = (label or "").lower()
+    markers = (
+        "deposit",
+        "binance",
+        "coinbase",
+        "kraken",
+        "okx",
+        "bybit",
+        "bitget",
+        "mexc",
+        "kucoin",
+        "gate",
+        "exchange",
+        "custody",
+        "hot wallet",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _normalize_arkham_transfer(item: dict) -> dict | None:
+    from_entity = item.get("fromEntity") or {}
+    to_entity = item.get("toEntity") or {}
+    token = item.get("token") or item.get("asset") or {}
+
+    from_address = _first_truthy(
+        item.get("fromAddress"),
+        item.get("sourceAddress"),
+        (item.get("fromAccount") or {}).get("address"),
+    )
+    to_address = _first_truthy(
+        item.get("toAddress"),
+        item.get("destinationAddress"),
+        (item.get("toAccount") or {}).get("address"),
+    )
+    from_label = _label_or_wallet(
+        _first_truthy(
+            item.get("fromLabel"),
+            item.get("fromName"),
+            from_entity.get("name"),
+            (item.get("fromAccount") or {}).get("label"),
+        ),
+        from_address,
+    )
+    to_label = _label_or_wallet(
+        _first_truthy(
+            item.get("toLabel"),
+            item.get("toName"),
+            to_entity.get("name"),
+            (item.get("toAccount") or {}).get("label"),
+        ),
+        to_address,
+    )
+    token_symbol = str(
+        _first_truthy(
+            item.get("tokenSymbol"),
+            item.get("symbol"),
+            item.get("assetSymbol"),
+            token.get("symbol"),
+            token.get("ticker"),
+            item.get("chain"),
+        )
+        or "--"
+    ).upper()
+    chain_label = _normalize_whale_chain(
+        _first_truthy(item.get("chain"), item.get("network"), token.get("chain"), token_symbol)
+    )
+    amount_value = _first_truthy(
+        item.get("unitValue"),
+        item.get("amount"),
+        item.get("quantity"),
+        item.get("tokenAmount"),
+        token.get("amount"),
+    )
+    usd_value = _first_truthy(
+        item.get("historicalUSD"),
+        item.get("historicalUsd"),
+        item.get("usd"),
+        item.get("usdValue"),
+        item.get("valueUsd"),
+        item.get("historicalUsdAmount"),
+    )
+    minutes_ago = _minutes_ago(
+        _first_truthy(item.get("blockTimestamp"), item.get("timestamp"), item.get("time"))
+    )
+    flow = str(_first_truthy(item.get("flow"), item.get("direction"), "")).lower()
+    direction = "inflow" if "in" in flow else "outflow"
+    if not flow:
+        direction = "inflow" if _looks_like_exchange(to_label) else "outflow"
+
+    return {
+        "chain": chain_label,
+        "chainTone": _normalize_whale_tone(chain_label),
+        "from": from_label,
+        "fromAddress": _clean_wallet(from_address),
+        "to": to_label,
+        "toAddress": _clean_wallet(to_address),
+        "amount": _format_whale_amount(amount_value, token_symbol),
+        "usd": _format_meme_money(_coerce_float(usd_value)),
+        "direction": direction,
+        "minutesAgo": minutes_ago,
+    }
+
+
+def fetch_arkham_whale_feed(limit: int) -> list[dict]:
+    if not ARKHAM_API_KEY:
+        return []
+
+    params = {
+        "limit": max(8, min(int(limit or WHALE_FEED_DEFAULT_LIMIT), 24)),
+        "sortKey": "time",
+        "sortDir": "desc",
+        "timeLast": ARKHAM_WHALE_TIME_LAST,
+        "chains": ARKHAM_WHALE_CHAINS,
+        "from": ARKHAM_WHALE_FROM,
+        "to": ARKHAM_WHALE_TO,
+    }
+    if ARKHAM_WHALE_USD_GTE:
+        params["usdGte"] = ARKHAM_WHALE_USD_GTE
+
+    try:
+        with httpx.Client(timeout=18.0, follow_redirects=True) as client:
+            response = client.get(
+                ARKHAM_TRANSFERS_URL,
+                params=params,
+                headers={"API-Key": ARKHAM_API_KEY},
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except Exception:
+        return []
+
+    raw_items = payload if isinstance(payload, list) else (
+        payload.get("transfers") or payload.get("items") or payload.get("data") or []
+    )
+    items: list[dict] = []
+    for entry in raw_items:
+        if not isinstance(entry, dict):
+            continue
+        normalized = _normalize_arkham_transfer(entry)
+        if normalized:
+            items.append(normalized)
+        if len(items) >= params["limit"]:
+            break
+    return items
+
+
 def fetch_whale_feed(limit: int = WHALE_FEED_DEFAULT_LIMIT) -> list[dict]:
     normalized_limit = max(8, min(int(limit or WHALE_FEED_DEFAULT_LIMIT), 24))
     cache_key = f"{WHALE_FEED_REDIS_KEY}:{normalized_limit}"
@@ -918,6 +1194,15 @@ def fetch_whale_feed(limit: int = WHALE_FEED_DEFAULT_LIMIT) -> list[dict]:
     local_cached = WHALE_FEED_CACHE.get(cache_key) or {}
     if local_cached.get("items") and (now - float(local_cached.get("timestamp", 0.0))) < WHALE_FEED_TTL:
         return list(local_cached["items"])
+
+    arkham_items = fetch_arkham_whale_feed(limit=normalized_limit)
+    if arkham_items:
+        WHALE_FEED_CACHE[cache_key] = {"timestamp": now, "items": arkham_items}
+        try:
+            cache_set_json(cache_key, arkham_items, WHALE_FEED_TTL)
+        except Exception:
+            pass
+        return list(arkham_items)
 
     offset = int(now // WHALE_FEED_TTL) % len(WHALE_FEED_SEED)
     ordered = WHALE_FEED_SEED[offset:] + WHALE_FEED_SEED[:offset]

@@ -82,6 +82,7 @@ const COPY = {
     ocrReady: 'OCR ready',
     ocrFailed: 'OCR failed',
     ocrNoText: 'No text found in image.',
+    loginPrompt: 'Please login to continue the conversation. Tap the avatar in the top-right corner to sign in.',
   },
   zh: {
     welcome: "Hello, I'm your Elephant Jungle assistant. 你好，请问需要什么帮助？",
@@ -112,6 +113,7 @@ const COPY = {
     ocrReady: '识别完成',
     ocrFailed: '识别失败',
     ocrNoText: '图片里没有识别到文字。',
+    loginPrompt: '请登录后继续对话。点击右上角头像进行登录。',
   },
 }
 
@@ -210,6 +212,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState('')
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [guestChatUsed, setGuestChatUsed] = useState(false)
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -574,19 +577,34 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const checkAuth = useCallback(async () => {
     const token = window.localStorage.getItem('elephant_auth_token')
     const email = window.localStorage.getItem('elephant_user_email')
-    if (!token || !email) return
+    if (token && email) {
+      try {
+        const response = await fetch(`${apiBase}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!response.ok) throw new Error('invalid token')
+        setAuthToken(token)
+        setUserEmail(email)
+        return
+      } catch {
+        window.localStorage.removeItem('elephant_auth_token')
+        window.localStorage.removeItem('elephant_user_email')
+      }
+    }
+    // Check if httpOnly cookie still has a valid session
     try {
-      const response = await fetch(`${apiBase}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!response.ok) throw new Error('invalid token')
-      setAuthToken(token)
-      setUserEmail(email)
+      const response = await fetch(`${apiBase}/auth/me`)
+      if (response.ok) {
+        const data = await response.json()
+        const email = data.user?.email || ''
+        setAuthToken('cookie')
+        setUserEmail(email)
+        if (email) {
+          window.localStorage.setItem('elephant_user_email', email)
+        }
+      }
     } catch {
-      window.localStorage.removeItem('elephant_auth_token')
-      window.localStorage.removeItem('elephant_user_email')
-      setAuthToken('')
-      setUserEmail('')
+      // No cookie session
     }
   }, [apiBase])
 
@@ -603,14 +621,25 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       })
       if (!response.ok) return
       const data = await response.json()
-      const history = (data.messages || []).map((msg) => ({
-        id: `hist-${msg.id}`,
-        role: msg.role === 'bot' ? 'bot' : 'user',
-        text: msg.content,
-        query: msg.query || '',
-        hideActions: true,
-        hiddenWhilePending: false,
-      }))
+      const history = []
+      for (const msg of (data.messages || [])) {
+        history.push({
+          id: `hist-user-${msg.id}`,
+          role: 'user',
+          text: msg.user_content,
+          query: '',
+          hideActions: true,
+          hiddenWhilePending: false,
+        })
+        history.push({
+          id: `hist-bot-${msg.id}`,
+          role: 'bot',
+          text: msg.bot_content,
+          query: msg.user_content || '',
+          hideActions: true,
+          hiddenWhilePending: false,
+        })
+      }
       if (history.length) {
         setMessages(history)
         setHistoryLoaded(true)
@@ -674,10 +703,12 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   }
 
   const logout = () => {
+    fetch(`${apiBase}/auth/logout`, { method: 'POST' }).catch(() => {})
     setAuthToken('')
     setUserEmail('')
     setMessages([])
     setHistoryLoaded(false)
+    setGuestChatUsed(false)
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem('elephant_auth_token')
       window.localStorage.removeItem('elephant_user_email')
@@ -755,6 +786,24 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     interruptActiveReply()
     setIsStreaming(true)
     boost()
+
+    // Guest gate: only 1 free message before login
+    if (!authToken && guestChatUsed) {
+      setIsStreaming(false)
+      setSelectedImageFile(null)
+      setSelectedImagePreview('')
+      setOcrState(null)
+      const botId = `bot-blocked-${Date.now()}`
+      setMessages((prev) => [...prev, { id: botId, role: 'bot', text: '', thinking: true, query: '' }])
+      scrollToBottom()
+      streamThinkingText(botId)
+      setTimeout(() => {
+        streamAssistantText(botId, copy.loginPrompt, '')
+      }, 400)
+      return
+    }
+
+    if (!authToken) setGuestChatUsed(true)
 
     const userText = query.trim()
     const userMessage = retryMessageId
@@ -1027,7 +1076,10 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       </div>
       </div>
       {accountSheetOpen ? (
-        <div className="account-sheet-backdrop" onClick={() => setAccountSheetOpen(false)}>
+        <div className="account-sheet-backdrop" onClick={() => {
+            if (document.activeElement?.tagName === 'INPUT') return;
+            setAccountSheetOpen(false);
+          }}>
           <div className="account-sheet" onClick={(event) => event.stopPropagation()}>
             <div className="account-sheet-title">{copy.loginTitle}</div>
             {userEmail ? (

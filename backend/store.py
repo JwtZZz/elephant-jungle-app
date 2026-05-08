@@ -100,14 +100,29 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('user', 'bot')),
-                content TEXT NOT NULL,
-                query TEXT,
+                user_content TEXT NOT NULL,
+                bot_content TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
             """
         )
+        # Migration: drop old schema if it had 'role' column (old format)
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()}
+        if "role" in existing_cols:
+            conn.execute("DROP TABLE chat_messages")
+            conn.execute(
+                """
+                CREATE TABLE chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    user_content TEXT NOT NULL,
+                    bot_content TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                )
+                """
+            )
         ensure_columns(conn, "documents", DOCUMENT_COLUMNS)
         ensure_columns(conn, "chunks", CHUNK_COLUMNS)
 
@@ -348,11 +363,11 @@ def create_user(email: str) -> dict:
         return {"id": int(cur.lastrowid), "email": email}
 
 
-def save_chat_message(user_id: int, role: str, content: str, query: str | None = None) -> int:
+def save_chat_message(user_id: int, user_content: str, bot_content: str) -> int:
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO chat_messages(user_id, role, content, query) VALUES(?, ?, ?, ?)",
-            (user_id, role, content, query),
+            "INSERT INTO chat_messages(user_id, user_content, bot_content) VALUES(?, ?, ?)",
+            (user_id, user_content, bot_content),
         )
         return int(cur.lastrowid)
 
@@ -361,7 +376,7 @@ def get_chat_history(user_id: int, limit: int = 100) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT id, role, content, query, created_at
+            SELECT id, user_content, bot_content, created_at
             FROM chat_messages
             WHERE user_id = ?
             ORDER BY id ASC

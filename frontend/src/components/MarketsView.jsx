@@ -4,6 +4,8 @@ import MarketBoard from './MarketBoard'
 const DETAIL_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d']
 const MEME_BANNER_CACHE_KEY = 'meme-banner-cache:v1'
 const MEME_BANNER_CACHE_TTL_MS = 10 * 60 * 1000
+const WHALE_FEED_CACHE_KEY = 'whale-feed-cache:v1'
+const WHALE_FEED_CACHE_TTL_MS = 20 * 1000
 
 const COPY = {
   en: {
@@ -59,6 +61,14 @@ const COPY = {
     hotVolume: '6H Vol',
     hotTxns: '6H Txns',
     hotCap: 'Mkt Cap',
+    whaleFeed: 'Whale Flow',
+    whaleTime: 'Time',
+    whaleRoute: 'Flow',
+    whaleAmount: 'Amount',
+    whaleUsd: 'USD',
+    whaleLoading: 'Loading whale transfers...',
+    whaleEmpty: 'No whale transfers were returned yet.',
+    whaleCache: 'Redis · 10s cache',
   },
   zh: {
     back: '返回市场',
@@ -113,6 +123,14 @@ const COPY = {
     hotVolume: '6H 量',
     hotTxns: '6H 交易',
     hotCap: '市值',
+    whaleFeed: '巨鲸流向',
+    whaleTime: '时间',
+    whaleRoute: '流向',
+    whaleAmount: '数量',
+    whaleUsd: '美元',
+    whaleLoading: '正在加载巨鲸转账...',
+    whaleEmpty: '暂时还没有抓到新的巨鲸转账。',
+    whaleCache: 'Redis · 10 秒缓存',
   },
 }
 
@@ -226,6 +244,80 @@ function writeMemeBannerCache(items) {
   }
 }
 
+function readWhaleFeedCache() {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(WHALE_FEED_CACHE_KEY)
+    if (!raw) return []
+    const payload = JSON.parse(raw)
+    const timestamp = Number(payload?.timestamp || 0)
+    const items = Array.isArray(payload?.items) ? payload.items : []
+    if (!timestamp || !items.length) return []
+    if ((Date.now() - timestamp) > WHALE_FEED_CACHE_TTL_MS) return []
+    return items
+  } catch {
+    return []
+  }
+}
+
+function writeWhaleFeedCache(items) {
+  if (typeof window === 'undefined' || !Array.isArray(items) || !items.length) return
+  try {
+    window.localStorage.setItem(
+      WHALE_FEED_CACHE_KEY,
+      JSON.stringify({ timestamp: Date.now(), items }),
+    )
+  } catch {
+    // ignore cache write failures
+  }
+}
+
+function formatWhaleAge(value, language) {
+  const minutes = Number(value || 0)
+  if (!Number.isFinite(minutes) || minutes <= 0) return language === 'zh' ? '刚刚' : 'now'
+  if (minutes < 60) return language === 'zh' ? `${minutes}分前` : `${minutes}m`
+  const hours = Math.round(minutes / 60)
+  return language === 'zh' ? `${hours}小时前` : `${hours}h`
+}
+
+function compactWhaleLabel(value, size = 22) {
+  const text = String(value || '').trim()
+  if (!text) return '--'
+  if (text.length <= size) return text
+  return `${text.slice(0, size - 1)}…`
+}
+
+function compactWhaleAddress(value) {
+  const text = String(value || '').trim()
+  if (!text) return '--'
+  return text
+}
+
+function extractWhaleToken(item) {
+  const amount = String(item?.amount || '').trim()
+  const match = amount.match(/([A-Z][A-Z0-9.]*)$/)
+  return match ? match[1] : (item?.chain || '--')
+}
+
+function buildTokenIconMap(rows) {
+  const iconMap = {}
+  for (const row of rows || []) {
+    if (row?.symbol && row?.image) iconMap[row.symbol.toUpperCase()] = row.image
+  }
+  return iconMap
+}
+
+function renderWhaleTokenBadge(item, tokenIcons) {
+  const symbol = extractWhaleToken(item)
+  const icon = tokenIcons[symbol]
+  const tone = String(item?.chainTone || symbol || '').toLowerCase()
+  return (
+    <span className={`whale-terminal-token whale-terminal-token-${tone}`}>
+      {icon ? <img src={icon} alt={symbol} /> : <span>{symbol.slice(0, 3)}</span>}
+    </span>
+  )
+}
+
 function buildStatRows(items) {
   return items.map((item) => (
     <div className="market-terminal-stat-item" key={item.label}>
@@ -233,6 +325,128 @@ function buildStatRows(items) {
       <strong className={item.tone || ''}>{item.value}</strong>
     </div>
   ))
+}
+
+function WhaleTerminalPanel({ apiBase, copy, language, marketRows }) {
+  const [items, setItems] = useState(() => readWhaleFeedCache())
+  const [loading, setLoading] = useState(() => !readWhaleFeedCache().length)
+  const [copiedKey, setCopiedKey] = useState('')
+  const tokenIcons = useMemo(() => buildTokenIconMap(marketRows), [marketRows])
+
+  useEffect(() => {
+    let ignore = false
+    const cached = readWhaleFeedCache()
+    if (cached.length) {
+      setItems(cached)
+      setLoading(false)
+    }
+
+    const load = async () => {
+      try {
+        const response = await fetch(`${apiBase}/whales/feed?limit=16`)
+        if (!response.ok) throw new Error(`whale feed failed (${response.status})`)
+        const payload = await response.json()
+        const nextItems = Array.isArray(payload.items) ? payload.items : []
+        if (!ignore && nextItems.length) {
+          setItems(nextItems)
+          writeWhaleFeedCache(nextItems)
+        }
+      } catch (error) {
+        console.error('Whale feed fallback', error)
+      } finally {
+        if (!ignore) setLoading(false)
+      }
+    }
+
+    load()
+    const timer = window.setInterval(load, 12000)
+    return () => {
+      ignore = true
+      window.clearInterval(timer)
+    }
+  }, [apiBase])
+
+  useEffect(() => {
+    if (!copiedKey) return undefined
+    const timer = window.setTimeout(() => setCopiedKey(''), 1200)
+    return () => window.clearTimeout(timer)
+  }, [copiedKey])
+
+  const handleCopyAddress = async (value, key) => {
+    const text = String(value || '').trim()
+    if (!text || text === '--') return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedKey(key)
+    } catch (error) {
+      console.error('copy whale address failed', error)
+    }
+  }
+
+  return (
+    <section className="whale-terminal-panel">
+      <div className="whale-terminal-head">
+        <div className="whale-terminal-kicker">{copy.whaleFeed}</div>
+        <div className="whale-terminal-cache">{copy.whaleCache}</div>
+      </div>
+
+      <div className="whale-terminal-table-head whale-terminal-table-head-single">
+        <span>{copy.whaleTime}</span>
+        <span>{copy.whaleRoute}</span>
+        <span>{copy.whaleAmount}</span>
+        <span>{copy.whaleUsd}</span>
+      </div>
+
+      <div className="whale-terminal-table whale-terminal-table-single">
+        {loading && !items.length ? <div className="whale-terminal-empty">{copy.whaleLoading}</div> : null}
+        {!loading && !items.length ? <div className="whale-terminal-empty">{copy.whaleEmpty}</div> : null}
+        {items.map((item, index) => {
+          const inflow = String(item.direction || '').toLowerCase() === 'inflow'
+          const fromKey = `${item.fromAddress}-${index}-from`
+          const toKey = `${item.toAddress}-${index}-to`
+          return (
+            <div className="whale-terminal-row whale-terminal-row-single" key={`${item.fromAddress}-${item.toAddress}-${index}`}>
+              <div className="whale-terminal-timecell whale-terminal-timecell-single">
+                {renderWhaleTokenBadge(item, tokenIcons)}
+                <span>{formatWhaleAge(item.minutesAgo, language)}</span>
+              </div>
+
+              <div className="whale-terminal-routecell whale-terminal-routecell-single">
+                <div className="whale-terminal-route-top whale-terminal-route-top-single">
+                  <span className="whale-terminal-entity">{compactWhaleLabel(item.from, 24)}</span>
+                  <span className="whale-terminal-arrow">{inflow ? '→' : '⇢'}</span>
+                  <span className="whale-terminal-entity">{compactWhaleLabel(item.to, 24)}</span>
+                </div>
+                <div className="whale-terminal-address-strip">
+                  <button
+                    type="button"
+                    className={`whale-terminal-address-chip ${copiedKey === fromKey ? 'copied' : ''}`}
+                    onClick={() => handleCopyAddress(item.fromAddress, fromKey)}
+                    title={item.fromAddress}
+                  >
+                    <span className="whale-terminal-address-role">FROM</span>
+                    <span className="whale-terminal-address-value">{compactWhaleAddress(item.fromAddress)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`whale-terminal-address-chip ${copiedKey === toKey ? 'copied' : ''}`}
+                    onClick={() => handleCopyAddress(item.toAddress, toKey)}
+                    title={item.toAddress}
+                  >
+                    <span className="whale-terminal-address-role">TO</span>
+                    <span className="whale-terminal-address-value">{compactWhaleAddress(item.toAddress)}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className={`whale-terminal-amount ${inflow ? 'inflow' : 'outflow'}`}>{item.amount}</div>
+              <div className="whale-terminal-usd">{item.usd}</div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
 }
 
 function KlineChart({ candles, activeIndex, onActiveIndexChange }) {
@@ -842,9 +1056,10 @@ export default function MarketsView({ apiBase, marketRows, briefs, language }) {
     <div className="workspace-view active market-home-view">
       <div className="market-home-layout">
         <div className="market-shell">
-          <div className="market-home-hero">
-            <div className="market-home-main">
+        <div className="market-home-hero">
+            <div className="market-home-main market-home-main-stack">
               <MarketBoard rows={marketRows} language={language} onSelectCoin={(coin) => setSelectedCoin(coin)} />
+              <WhaleTerminalPanel apiBase={apiBase} copy={copy} language={language} marketRows={marketRows} />
             </div>
             <MemeBannerPanel apiBase={apiBase} copy={copy} />
           </div>
