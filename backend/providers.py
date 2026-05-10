@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Iterable
 
@@ -32,6 +33,9 @@ def validate_provider_env() -> None:
         return
     if provider == "minimax":
         _must_env("MINIMAX_API_KEY")
+        return
+    if provider == "bigmodel":
+        _must_env("BIGMODEL_API_KEY")
         return
     raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
 
@@ -166,6 +170,80 @@ def _chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
     if provider == "minimax":
         return _minimax_chat_completion(messages, temperature=temperature)
     raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
+
+
+def _chat_completion_raw(
+    messages: list[dict],
+    temperature: float = 0.2,
+    tools: list[dict] | None = None,
+) -> dict:
+    """Send a chat completion and return the full assistant message dict.
+
+    When *tools* are provided they are included in the request so the model
+    can respond with ``tool_calls``.  The returned dict may contain
+    ``content`` (str | None) and/or ``tool_calls`` (list).
+
+    Raises on HTTP / API errors.
+    """
+    provider = _get_chat_provider()
+
+    if provider == "dashscope":
+        api_key = _must_env("DASHSCOPE_API_KEY")
+        model = os.getenv("ALI_CHAT_MODEL", "qwen3.5-flash")
+        url = os.getenv(
+            "ALI_CHAT_URL",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        )
+    elif provider == "nvidia":
+        api_key = _must_env("NVIDIA_API_KEY")
+        model = os.getenv("NVIDIA_MODEL", "z-ai/glm5")
+        url = os.getenv(
+            "NVIDIA_CHAT_URL",
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+        )
+    elif provider == "minimax":
+        api_key = _must_env("MINIMAX_API_KEY")
+        model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+        url = os.getenv(
+            "MINIMAX_CHAT_URL",
+            "https://api.minimax.chat/v1/text/chatcompletion_v2",
+        )
+    elif provider == "bigmodel":
+        api_key = _must_env("BIGMODEL_API_KEY")
+        model = os.getenv("BIGMODEL_MODEL", "glm-4-flash")
+        url = os.getenv(
+            "BIGMODEL_CHAT_URL",
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        )
+    else:
+        raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
+
+    data: dict = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": 2048,
+        "stream": False,
+    }
+    if tools:
+        data["tools"] = tools
+        data["tool_choice"] = "auto"
+
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(url, headers=headers, json=data)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    choices = payload.get("choices", [])
+    if not choices:
+        raise RuntimeError(f"Bad chat completion response: {payload}")
+    message = choices[0].get("message", {})
+    if not message:
+        raise RuntimeError(f"Empty message in response: {payload}")
+
+    return message
 
 
 def _extract_message_text(message: dict) -> str:

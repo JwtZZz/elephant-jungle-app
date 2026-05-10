@@ -1,7 +1,11 @@
+import json
 import re
 
 from providers import embed_texts, generate_answer, generate_general_answer
+from providers import _chat_completion_raw
 from store import insert_chunks, insert_document, search_chunks
+
+from agent_tools import TOOL_DEFINITIONS, AGENT_SYSTEM_PROMPT, execute_tool
 
 
 DEFAULT_TOP_K = 5
@@ -57,39 +61,85 @@ def parse_heading_level(line: str) -> int:
     return 0
 
 
+def _extract_sentences(text: str) -> list[str]:
+    """Split text into sentences, preserving delimiters."""
+    parts = re.split(r"(?<=[.!?。！？])\s*", text)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _sentence_overlap(text: str, target_chars: int = 120) -> str:
+    """Take the last ~target_chars worth of complete sentences as overlap."""
+    sentences = _extract_sentences(text)
+    overlap = ""
+    for s in reversed(sentences):
+        s = s.strip()
+        if not s:
+            continue
+        candidate = f"{s} {overlap}".strip() if overlap else s
+        if len(candidate) > target_chars and overlap:
+            break
+        overlap = candidate
+    return overlap
+
+
 def split_long_text(text: str, chunk_size: int, overlap: int) -> list[str]:
+    """Four-layer priority splitting: paragraph → sentence → character window.
+
+    1. Entire text fits → single chunk.
+    2. Split by paragraph (blank line) — each paragraph stays intact if possible.
+    3. Long paragraphs split by sentence boundaries.
+    4. Single sentence exceeds chunk_size → character-window fallback.
+
+    Overlap is always at sentence level (not fixed character count).
+    """
     text = text.strip()
     if not text:
         return []
     if len(text) <= chunk_size:
         return [text]
 
-    sentences = re.split(r"(?<=[.!?。！？])\s*", text)
+    # Layer 2: paragraph boundaries
+    paragraphs = re.split(r"\n\s*\n", text)
     chunks: list[str] = []
-    current = ""
 
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
             continue
-        candidate = f"{current} {sentence}".strip() if current else sentence
-        if len(candidate) <= chunk_size:
-            current = candidate
+
+        if len(para) <= chunk_size:
+            chunks.append(para)
             continue
+
+        # Layer 3: sentence boundaries
+        sentences = _extract_sentences(para)
+        current = ""
+
+        for sentence in sentences:
+            if not sentence:
+                continue
+
+            candidate = f"{current} {sentence}".strip() if current else sentence
+
+            if len(candidate) <= chunk_size:
+                current = candidate
+                continue
+
+            if current:
+                chunks.append(current)
+                # Sentence-level overlap
+                current = f"{_sentence_overlap(current, overlap)} {sentence}".strip()
+            else:
+                # Layer 4: character-window fallback for overlong sentence
+                step = max(1, chunk_size - overlap)
+                for i in range(0, len(sentence), step):
+                    piece = sentence[i : i + chunk_size].strip()
+                    if piece:
+                        chunks.append(piece)
+                current = ""
+
         if current:
             chunks.append(current)
-            overlap_text = current[-overlap:].strip()
-            current = f"{overlap_text} {sentence}".strip() if overlap_text else sentence
-        else:
-            step = max(1, chunk_size - overlap)
-            for i in range(0, len(sentence), step):
-                piece = sentence[i : i + chunk_size].strip()
-                if piece:
-                    chunks.append(piece)
-            current = ""
-
-    if current:
-        chunks.append(current)
 
     return chunks
 
@@ -245,7 +295,11 @@ def chunk_text(
             for sub_chunk in _chunk_block(block_text, kind, base_chunk_size, overlap):
                 sub_chunk = sub_chunk.strip()
                 if sub_chunk:
-                    results.append({"text": sub_chunk, "heading_path": heading_path})
+                    results.append({
+                        "text": sub_chunk,
+                        "heading_path": heading_path,
+                        "chunk_type": kind,
+                    })
 
     return results
 
@@ -310,12 +364,14 @@ def ingest_document(
 
     chunk_texts = [c["text"] for c in chunk_dicts]
     heading_paths = [c["heading_path"] for c in chunk_dicts]
+    chunk_types = [c.get("chunk_type", "paragraph") for c in chunk_dicts]
     embeddings = embed_texts(chunk_texts)
     count = insert_chunks(
         document_id=doc_id,
         chunks=chunk_texts,
         embeddings=embeddings,
         heading_paths=heading_paths,
+        chunk_types=chunk_types,
     )
     return {
         "document_id": doc_id,
@@ -378,3 +434,112 @@ def chat(query: str, top_k: int = DEFAULT_TOP_K, use_rag: bool = True) -> dict:
     answer = generate_answer(query=query, contexts=[context_text])
     answer = f"{answer}\n\n命中分数：{top_score:.3f}"
     return {"answer": answer, "contexts": hits, "sources": sources, "mode": "rag"}
+
+
+MAX_AGENT_TURNS = 6
+
+
+MAX_HISTORY_TURNS = 6
+
+MEMORY_SUMMARIZER_PROMPT = (
+    "你是一个记忆管理器。根据旧的记忆摘要和最新的对话，提炼更新后的记忆摘要。\n"
+    "摘要应包含用户的兴趣、偏好、关注的话题、问过的币种等关键信息。\n"
+    "只输出事实，不要评价。按条目组织，保持简洁，不超过200字。"
+)
+
+
+def update_memory_summary(old_summary: str, query: str, answer: str) -> str:
+    """Merge old memory summary with the latest Q&A turn into a new summary."""
+    messages = [
+        {"role": "system", "content": MEMORY_SUMMARIZER_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"旧摘要：\n{old_summary if old_summary else '（无）'}\n\n"
+                f"最新对话：\n用户：{query}\n助手：{answer}\n\n"
+                f"更新后的摘要："
+            ),
+        },
+    ]
+    try:
+        result = _chat_completion_raw(messages, temperature=0.1)
+        return (result.get("content") or "").strip() or old_summary
+    except Exception:
+        return old_summary
+
+
+def agent_chat(
+    query: str,
+    history_messages: list[dict] | None = None,
+    memory_summary: str | None = None,
+) -> dict:
+    """Chat with tool-calling ability (market-data agent).
+
+    Args:
+        query: The current user query.
+        history_messages: Optional previous {"role", "content"} pairs
+                          for multi-turn context.
+        memory_summary: Optional persistent memory summary to inject into context.
+    """
+    system_content = AGENT_SYSTEM_PROMPT
+    if memory_summary:
+        system_content += f"\n\n【对话记忆】\n{memory_summary}"
+
+    # Pre-search knowledge base: if results are relevant enough, inject them
+    # so the LLM doesn't need to decide to call search_knowledge_base.
+    kb_context: str | None = None
+    try:
+        hits = search(query, top_k=3)
+        if hits and hits[0]["score"] >= FALLBACK_SCORE_THRESHOLD:
+            kb_context = _build_context(hits)
+    except Exception:
+        pass
+
+    messages: list[dict] = [
+        {"role": "system", "content": system_content},
+    ]
+    if history_messages:
+        messages.extend(history_messages)
+    if kb_context:
+        messages.append({
+            "role": "user",
+            "content": (
+                f"以下是与问题可能相关的知识库内容（来自内部知识库搜索）：\n"
+                f"{kb_context}\n\n"
+                f"请基于这些信息回答，如果需要更多数据可以调用工具。\n\n"
+                f"用户问题：{query}"
+            ),
+        })
+    else:
+        messages.append({"role": "user", "content": query})
+
+    for turn in range(MAX_AGENT_TURNS):
+        message = _chat_completion_raw(messages, tools=TOOL_DEFINITIONS)
+        tool_calls = message.get("tool_calls")
+
+        if not tool_calls:
+            content = message.get("content", "") or ""
+            return {"answer": content.strip(), "mode": "agent"}
+
+        messages.append({
+            "role": "assistant",
+            "content": message.get("content") or "",
+            "tool_calls": tool_calls,
+        })
+
+        for tc in tool_calls:
+            func_name = tc["function"]["name"]
+            try:
+                func_args = json.loads(tc["function"]["arguments"])
+            except json.JSONDecodeError:
+                func_args = {}
+
+            tool_result = execute_tool(func_name, func_args)
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": tool_result,
+            })
+
+    return {"answer": "抱歉，处理您的请求时超出了最大轮数，请重新提问。", "mode": "agent"}

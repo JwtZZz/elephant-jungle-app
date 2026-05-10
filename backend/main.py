@@ -16,19 +16,22 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 import auth
-from rag import DEFAULT_TOP_K, chat, ingest_document, search
+from rag import DEFAULT_TOP_K, agent_chat, chat, ingest_document, search, update_memory_summary
 from store import (
     create_user,
     find_user_by_email,
     find_user_by_id,
     get_chat_history,
+    get_memory_summary,
     init_db,
     save_chat_message,
+    save_memory_summary,
     sync_chroma_index,
 )
 from providers import ocr_image_data_url, translate_text, validate_provider_env
 from cache_store import get_json as cache_get_json, redis_status, set_json as cache_set_json
 from task_broker import get_job_status, publish_ingest_job, rabbitmq_status, start_ingest_worker
+from pump import create_token as pump_create_token, load_metadata as pump_load_metadata
 
 
 app = FastAPI(title="Minimal RAG Backend", version="0.1.0")
@@ -88,6 +91,7 @@ class ChatRequest(BaseModel):
     query: str
     top_k: int = Field(default=DEFAULT_TOP_K, ge=1, le=20)
     use_rag: bool = True
+    use_agent: bool = False
 
 
 class OcrImageRequest(BaseModel):
@@ -752,9 +756,35 @@ def search_route(req: SearchRequest) -> dict:
 @app.post("/chat")
 def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) -> dict:
     try:
-        result = chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
+        if req.use_agent:
+            history_messages = None
+            memory_summary = None
+            if user:
+                history = get_chat_history(user["id"])
+                if history:
+                    recent = history[-6:]
+                    history_messages = []
+                    for msg in recent:
+                        history_messages.append({"role": "user", "content": msg["user_content"]})
+                        history_messages.append({"role": "assistant", "content": msg["bot_content"]})
+                memory_summary = get_memory_summary(user["id"])
+            result = agent_chat(
+                query=req.query,
+                history_messages=history_messages,
+                memory_summary=memory_summary,
+            )
+        else:
+            result = chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
         if user:
             save_chat_message(user["id"], req.query, result.get("answer", ""))
+            if req.use_agent:
+                new_summary = update_memory_summary(
+                    old_summary=memory_summary or "",
+                    query=req.query,
+                    answer=result.get("answer", ""),
+                )
+                if new_summary:
+                    save_memory_summary(user["id"], new_summary)
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -1461,3 +1491,46 @@ def meme_banner(
         return {"items": fetch_meme_banner(chains=chain_items, limit=limit)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+class CreateTokenRequest(BaseModel):
+    name: str
+    symbol: str
+    description: str = ""
+    image_url: str = ""
+    twitter: str = ""
+    telegram: str = ""
+    website: str = ""
+    buy_amount: float = 0.0
+    slippage: float = 20.0
+
+
+@app.post("/meme/create-token")
+def create_meme_token(req: CreateTokenRequest) -> dict:
+    try:
+        result = pump_create_token(
+            name=req.name,
+            symbol=req.symbol,
+            description=req.description,
+            image_url=req.image_url,
+            twitter=req.twitter,
+            telegram=req.telegram,
+            website=req.website,
+        )
+        return {"ok": True, **result}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/meme/metadata/{token_id}.json")
+def serve_token_metadata(token_id: str) -> dict:
+    metadata = pump_load_metadata(token_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail="Metadata not found")
+    return metadata
+
+
+@app.get("/meme/wallet-info")
+def wallet_info() -> dict:
+    from pump import get_wallet_info
+    return get_wallet_info()

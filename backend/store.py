@@ -125,6 +125,7 @@ def init_db() -> None:
             )
         ensure_columns(conn, "documents", DOCUMENT_COLUMNS)
         ensure_columns(conn, "chunks", CHUNK_COLUMNS)
+        ensure_columns(conn, "users", {"memory_summary": "TEXT DEFAULT ''"})
 
 
 def insert_document(
@@ -185,7 +186,7 @@ def get_document(document_id: int) -> dict:
     return dict(row)
 
 
-def build_chunk_metadata(document: dict, chunk_index: int) -> dict:
+def build_chunk_metadata(document: dict, chunk_index: int, heading_path: str = "", chunk_type: str = "paragraph") -> dict:
     metadata = {
         "document_id": int(document["id"]),
         "chunk_index": int(chunk_index),
@@ -199,13 +200,23 @@ def build_chunk_metadata(document: dict, chunk_index: int) -> dict:
         "region": document.get("region") or "",
         "source_type": document.get("source_type") or "",
         "language": document.get("language") or "",
+        "heading_path": heading_path or "",
+        "chunk_type": chunk_type or "paragraph",
     }
     return metadata
 
 
-def insert_chunks(document_id: int, chunks: Iterable[str], embeddings: Iterable[list[float]]) -> int:
+def insert_chunks(
+    document_id: int,
+    chunks: Iterable[str],
+    embeddings: Iterable[list[float]],
+    heading_paths: Iterable[str] | None = None,
+    chunk_types: Iterable[str] | None = None,
+) -> int:
     chunk_list = list(chunks)
     embedding_list = list(embeddings)
+    heading_path_list = list(heading_paths) if heading_paths else [""] * len(chunk_list)
+    chunk_type_list = list(chunk_types) if chunk_types else ["paragraph"] * len(chunk_list)
     document = get_document(document_id)
     payload = [
         (document_id, index, chunk, json.dumps(embedding, ensure_ascii=False))
@@ -218,7 +229,10 @@ def insert_chunks(document_id: int, chunks: Iterable[str], embeddings: Iterable[
             payload,
         )
     chunk_ids = [str(before_id + index + 1) for index in range(len(payload))]
-    chunk_metadatas = [build_chunk_metadata(document, index) for index in range(len(chunk_list))]
+    chunk_metadatas = [
+        build_chunk_metadata(document, index, heading_path_list[index], chunk_type_list[index])
+        for index in range(len(chunk_list))
+    ]
     collection = get_chroma_collection()
     collection.upsert(
         ids=chunk_ids,
@@ -361,6 +375,23 @@ def create_user(email: str) -> dict:
             (email,),
         )
         return {"id": int(cur.lastrowid), "email": email}
+
+
+def get_memory_summary(user_id: int) -> str:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT memory_summary FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    return (row["memory_summary"] or "") if row else ""
+
+
+def save_memory_summary(user_id: int, summary: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET memory_summary = ? WHERE id = ?",
+            (summary, user_id),
+        )
 
 
 def save_chat_message(user_id: int, user_content: str, bot_content: str) -> int:

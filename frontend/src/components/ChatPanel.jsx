@@ -288,7 +288,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       const response = await fetch(`${apiBase}/chat`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ query, top_k: 5, use_rag: useRag }),
+        body: JSON.stringify({ query, top_k: 5, use_rag: useRag, use_agent: true }),
         signal: controller.signal,
       })
       if (!response.ok) {
