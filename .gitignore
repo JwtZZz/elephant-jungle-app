@@ -18,3 +18,4 @@ frontend.log
 frontend.pid
 backend.log
 backend/backend.log
+backend/remote-env.txt
