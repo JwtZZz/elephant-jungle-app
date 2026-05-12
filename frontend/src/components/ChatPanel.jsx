@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
+import { useSpriteHoverNews } from '../hooks/useSpriteHoverNews'
 import { useTheme } from '../hooks/useTheme'
 import ThemeToggle from './ThemeToggle'
 
@@ -247,6 +248,12 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         ],
   )
 
+  const hoverNewsChat = useSpriteHoverNews(apiBase, 2)
+  const hoverNewsInput = useSpriteHoverNews(apiBase, 3)
+
+  const chatBubbleText = hoverNewsChat.isHovered ? hoverNewsChat.bubbleText : spriteBubbleText
+  const inputBubbleText = hoverNewsInput.isHovered ? hoverNewsInput.bubbleText : spriteBubbleText
+
   const scrollToBottom = () => {
     window.requestAnimationFrame(() => {
       if (chatBoxRef.current) {
@@ -271,7 +278,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     })
   }
 
-  const askBackend = async (query, controller, options = {}) => {
+  const askBackend = async (query, controller, options = {}, onStatus = null) => {
     const { useRag = true } = options
     let didTimeout = false
     const timeoutId = window.setTimeout(() => {
@@ -285,10 +292,10 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       if (token) {
         headers['Authorization'] = `Bearer ${token}`
       }
-      const response = await fetch(`${apiBase}/chat`, {
+      const response = await fetch(`${apiBase}/chat/stream`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ query, top_k: 5, use_rag: useRag, use_agent: true }),
+        body: JSON.stringify({ query, top_k: 5, auto_intent: true }),
         signal: controller.signal,
       })
       if (!response.ok) {
@@ -301,8 +308,51 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         }
         throw new Error(detail)
       }
-      const payload = await response.json()
-      return payload.answer || copy.noAnswer
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let answerText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() || ''
+
+        for (const part of parts) {
+          const lines = part.split('\n')
+          let eventType = ''
+          let eventData = ''
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim()
+            } else if (line.startsWith('data: ')) {
+              eventData = line.slice(6).trim()
+            }
+          }
+
+          if (!eventData) continue
+
+          try {
+            const parsed = JSON.parse(eventData)
+            if (eventType === 'intent' || eventType === 'status' || eventType === 'tool_call' || eventType === 'tool_result') {
+              if (onStatus) onStatus(parsed.message || parsed.text || '')
+            } else if (eventType === 'answer') {
+              answerText = parsed.text || ''
+            } else if (eventType === 'error') {
+              throw new Error(parsed.message || copy.requestFailed)
+            }
+          } catch (e) {
+            if (e.message !== 'Unexpected token') throw e
+          }
+        }
+      }
+
+      return answerText || copy.noAnswer
     } catch (error) {
       if (error.name === 'AbortError') {
         if (didTimeout) {
@@ -852,7 +902,13 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
           : `[Image OCR]\n${extractedText}`
       }
 
-      const answer = await askBackend(backendQuery, controller, { useRag })
+      const answer = await askBackend(backendQuery, controller, { useRag }, (statusText) => {
+	        setMessages((prev) =>
+	          prev.map((m) =>
+	            m.id === botId ? { ...m, statusText } : m,
+	          ),
+	        )
+	      })
       if (runId !== activeRunIdRef.current) return
       streamAssistantText(botId, answer, backendQuery)
       snapViewportToTop()
@@ -933,8 +989,11 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       <div className={`right-panel ${mobileOnly ? 'mobile-chat-panel' : ''}`}>
       <div className={`chat-stage ${mobileOnly ? 'mobile-chat-stage' : ''}`}>
         <div className="chat-sprite-track" ref={chatSpriteTrackRef} aria-hidden="true">
-          <div className="sprite-shell facing-right" ref={chatSpriteShellRef}>
-            {spriteBubbleText ? <div className="sprite-bubble">{spriteBubbleText}</div> : null}
+          <div className="sprite-shell facing-right" ref={chatSpriteShellRef}
+            onMouseEnter={hoverNewsChat.handleMouseEnter}
+            onMouseLeave={hoverNewsChat.handleMouseLeave}
+          >
+            {chatBubbleText ? <div className="sprite-bubble">{chatBubbleText}</div> : null}
             <div className={`sprite-avatar ${spriteMode}`} />
           </div>
         </div>
@@ -948,6 +1007,9 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
                     <img className="chat-image-preview" src={message.imageUrl} alt="uploaded content" />
                   ) : null}
                   {message.text ? <div>{message.text}</div> : null}
+                  {message.thinking && message.statusText ? (
+                    <div className="thinking-status">{message.statusText}</div>
+                  ) : null}
                 </div>
                 {message.role === 'bot' && !message.thinking && !message.hideActions && message.text.trim() ? (
                   <MessageActions
@@ -967,8 +1029,11 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         <div className="input-wrap">
           {!mobileOnly ? (
             <div className="input-sprite-track" ref={inputSpriteTrackRef} aria-hidden="true">
-              <div className="sprite-shell facing-left" ref={inputSpriteShellRef}>
-                {spriteBubbleText ? <div className="sprite-bubble">{spriteBubbleText}</div> : null}
+              <div className="sprite-shell facing-left" ref={inputSpriteShellRef}
+                onMouseEnter={hoverNewsInput.handleMouseEnter}
+                onMouseLeave={hoverNewsInput.handleMouseLeave}
+              >
+                {inputBubbleText ? <div className="sprite-bubble">{inputBubbleText}</div> : null}
                 <div className={`sprite-avatar ${spriteMode}`} />
               </div>
             </div>
@@ -1016,12 +1081,18 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
                 setInputValue(event.target.value)
                 boost()
               }}
+              onCompositionStart={() => {
+                if (textInputRef.current) textInputRef.current.dataset.composing = 'true'
+              }}
+              onCompositionEnd={() => {
+                if (textInputRef.current) textInputRef.current.dataset.composing = 'false'
+              }}
               onBlur={() => {
                 cruise()
                 window.setTimeout(snapViewportToTop, 90)
               }}
               onKeyDown={(event) => {
-                if (event.key === 'Enter') {
+                if (event.key === 'Enter' && event.currentTarget.dataset.composing !== 'true') {
                   const query = inputValue
                   setInputValue('')
                   if (mobileOnly) {
@@ -1105,7 +1176,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
                     disabled={codeSent}
                     onChange={(event) => setEmailDraft(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !codeSent) {
+                      if (event.key === 'Enter' && !event.isComposing && !codeSent) {
                         sendVerificationCode()
                       }
                     }}

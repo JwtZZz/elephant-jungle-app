@@ -169,7 +169,9 @@ def _chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
         return _nvidia_chat_completion(messages, temperature=temperature)
     if provider == "minimax":
         return _minimax_chat_completion(messages, temperature=temperature)
-    raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
+    # _chat_completion_raw supports bigmodel, reuse it
+    msg = _chat_completion_raw(messages, temperature=temperature)
+    return (msg.get("content") or "").strip()
 
 
 def _chat_completion_raw(

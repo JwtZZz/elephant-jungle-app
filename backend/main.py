@@ -12,10 +12,13 @@ import httpx
 from fastapi import FastAPI, HTTPException, Header, Request, Response
 from fastapi import Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from queue import Queue, Empty
 
 import auth
+from intent import INTENT_GENERAL, INTENT_KNOWLEDGE, INTENT_MARKET, INTENT_MIXED, classify_intent
 from rag import DEFAULT_TOP_K, agent_chat, chat, ingest_document, search, update_memory_summary
 from store import (
     create_user,
@@ -92,6 +95,7 @@ class ChatRequest(BaseModel):
     top_k: int = Field(default=DEFAULT_TOP_K, ge=1, le=20)
     use_rag: bool = True
     use_agent: bool = False
+    auto_intent: bool = True
 
 
 class OcrImageRequest(BaseModel):
@@ -753,21 +757,57 @@ def search_route(req: SearchRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+def _build_agent_history(user: dict | None) -> list[dict] | None:
+    if not user:
+        return None
+    history = get_chat_history(user["id"])
+    if not history:
+        return None
+    recent = history[-6:]
+    messages = []
+    for msg in recent:
+        messages.append({"role": "user", "content": msg["user_content"]})
+        messages.append({"role": "assistant", "content": msg["bot_content"]})
+    return messages
+
+
+def _load_memory(user: dict | None) -> str | None:
+    if not user:
+        return None
+    return get_memory_summary(user["id"])
+
+
 @app.post("/chat")
 def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) -> dict:
     try:
-        if req.use_agent:
-            history_messages = None
-            memory_summary = None
-            if user:
-                history = get_chat_history(user["id"])
-                if history:
-                    recent = history[-6:]
-                    history_messages = []
-                    for msg in recent:
-                        history_messages.append({"role": "user", "content": msg["user_content"]})
-                        history_messages.append({"role": "assistant", "content": msg["bot_content"]})
-                memory_summary = get_memory_summary(user["id"])
+        intent = None
+        if req.auto_intent:
+            intent = classify_intent(req.query)
+
+        if intent == INTENT_GENERAL:
+            result = chat(query=req.query, use_rag=False)
+        elif intent == INTENT_KNOWLEDGE:
+            result = chat(query=req.query, top_k=req.top_k, use_rag=True)
+        elif intent == INTENT_MARKET:
+            history_messages = _build_agent_history(user)
+            memory_summary = _load_memory(user)
+            result = agent_chat(
+                query=req.query,
+                history_messages=history_messages,
+                memory_summary=memory_summary,
+                intent=intent,
+            )
+        elif intent == INTENT_MIXED:
+            history_messages = _build_agent_history(user)
+            memory_summary = _load_memory(user)
+            result = agent_chat(
+                query=req.query,
+                history_messages=history_messages,
+                memory_summary=memory_summary,
+            )
+        elif req.use_agent:
+            history_messages = _build_agent_history(user)
+            memory_summary = _load_memory(user)
             result = agent_chat(
                 query=req.query,
                 history_messages=history_messages,
@@ -775,11 +815,15 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
             )
         else:
             result = chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
+
+        if intent:
+            result["intent"] = intent
+
         if user:
             save_chat_message(user["id"], req.query, result.get("answer", ""))
-            if req.use_agent:
+            if intent in (INTENT_MARKET, INTENT_MIXED) or req.use_agent:
                 new_summary = update_memory_summary(
-                    old_summary=memory_summary or "",
+                    old_summary=(_load_memory(user) or ""),
                     query=req.query,
                     answer=result.get("answer", ""),
                 )
@@ -789,6 +833,78 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+
+
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user)) -> StreamingResponse:
+    """SSE streaming chat — emits status/tool_call/answer events during processing."""
+
+    def _sse(event, data):
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def generate():
+        event_queue = Queue()
+
+        def on_event(etype, message):
+            event_queue.put((etype, {"message": message}))
+
+        def worker():
+            try:
+                intent = None
+                if req.auto_intent:
+                    intent = classify_intent(req.query)
+                    event_queue.put(("intent", {"intent": intent, "message": f"意图: {intent}"}))
+
+                if intent == "general":
+                    result = chat(query=req.query, use_rag=False)
+                    event_queue.put(("answer", {"text": result["answer"]}))
+                elif intent == "knowledge":
+                    result = chat(query=req.query, top_k=req.top_k, use_rag=True)
+                    event_queue.put(("answer", {"text": result["answer"]}))
+                elif intent in ("market", "mixed") or req.use_agent:
+                    history_messages = _build_agent_history(user)
+                    memory_summary = _load_memory(user)
+                    result = agent_chat(
+                        query=req.query,
+                        history_messages=history_messages,
+                        memory_summary=memory_summary,
+                        intent=intent,
+                        on_event=on_event,
+                    )
+                    event_queue.put(("answer", {"text": result["answer"]}))
+                else:
+                    result = chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
+                    event_queue.put(("answer", {"text": result["answer"]}))
+
+                if user:
+                    save_chat_message(user["id"], req.query, result.get("answer", ""))
+                    if intent in ("market", "mixed") or req.use_agent:
+                        new_summary = update_memory_summary(
+                            old_summary=(_load_memory(user) or ""),
+                            query=req.query,
+                            answer=result.get("answer", ""),
+                        )
+                        if new_summary:
+                            save_memory_summary(user["id"], new_summary)
+            except Exception as exc:
+                event_queue.put(("error", {"message": str(exc)}))
+            finally:
+                event_queue.put(("__done__", {}))
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        while True:
+            try:
+                etype, edata = event_queue.get(timeout=2)
+                if etype == "__done__":
+                    break
+                yield _sse(etype, edata)
+            except Empty:
+                yield _sse("heartbeat", {})
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 @app.post("/ocr/image")
 def ocr_image_route(req: OcrImageRequest) -> dict:

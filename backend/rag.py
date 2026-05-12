@@ -468,10 +468,23 @@ def update_memory_summary(old_summary: str, query: str, answer: str) -> str:
         return old_summary
 
 
+TOOL_NAMES_ZH = {
+    "get_market_coins": "查询市场行情",
+    "get_okx_detail": "查询OKX盘口",
+    "get_market_briefs": "查询快讯",
+    "get_market_timeline": "查询新闻",
+    "get_meme_trending": "查询Meme币",
+    "get_whale_feed": "查询鲸鱼转账",
+    "search_knowledge_base": "搜索知识库",
+}
+
+
 def agent_chat(
     query: str,
     history_messages: list[dict] | None = None,
     memory_summary: str | None = None,
+    intent: str | None = None,
+    on_event: callable = None,
 ) -> dict:
     """Chat with tool-calling ability (market-data agent).
 
@@ -480,20 +493,27 @@ def agent_chat(
         history_messages: Optional previous {"role", "content"} pairs
                           for multi-turn context.
         memory_summary: Optional persistent memory summary to inject into context.
+        intent: Optional intent hint from intent classifier. Skips KB
+                pre-search when "market".
+        on_event: Optional callback(event_type, message) for streaming status updates.
     """
+    _emit = lambda t, m: on_event(t, m) if on_event else None
+
     system_content = AGENT_SYSTEM_PROMPT
     if memory_summary:
         system_content += f"\n\n【对话记忆】\n{memory_summary}"
 
-    # Pre-search knowledge base: if results are relevant enough, inject them
-    # so the LLM doesn't need to decide to call search_knowledge_base.
+    # Pre-search knowledge base for non-market intents so the LLM
+    # doesn't need to decide to call search_knowledge_base.
     kb_context: str | None = None
-    try:
-        hits = search(query, top_k=3)
-        if hits and hits[0]["score"] >= FALLBACK_SCORE_THRESHOLD:
-            kb_context = _build_context(hits)
-    except Exception:
-        pass
+    if intent != "market":
+        _emit("status", "正在搜索知识库...")
+        try:
+            hits = search(query, top_k=3)
+            if hits and hits[0]["score"] >= FALLBACK_SCORE_THRESHOLD:
+                kb_context = _build_context(hits)
+        except Exception:
+            pass
 
     messages: list[dict] = [
         {"role": "system", "content": system_content},
@@ -514,10 +534,12 @@ def agent_chat(
         messages.append({"role": "user", "content": query})
 
     for turn in range(MAX_AGENT_TURNS):
+        _emit("status", "正在思考下一步操作...")
         message = _chat_completion_raw(messages, tools=TOOL_DEFINITIONS)
         tool_calls = message.get("tool_calls")
 
         if not tool_calls:
+            _emit("status", "正在生成回答...")
             content = message.get("content", "") or ""
             return {"answer": content.strip(), "mode": "agent"}
 
@@ -534,7 +556,10 @@ def agent_chat(
             except json.JSONDecodeError:
                 func_args = {}
 
+            zh_name = TOOL_NAMES_ZH.get(func_name, func_name)
+            _emit("tool_call", f"正在{zh_name}...")
             tool_result = execute_tool(func_name, func_args)
+            _emit("tool_result", f"{zh_name}完成")
 
             messages.append({
                 "role": "tool",

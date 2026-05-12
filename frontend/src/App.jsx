@@ -40,7 +40,7 @@ export default function App() {
       {!isMobileChatOnly ? (
         <div className="main">
           <div className="workspace-shell">
-            <Sidebar activeView={activeView} onSelect={setActiveView} language={language} />
+            <Sidebar activeView={activeView} onSelect={setActiveView} language={language} apiBase={apiBase} />
             <WorkspacePanel activeView={activeView} apiBase={apiBase} marketRows={marketRows} briefs={briefs} language={language} setLanguage={setLanguage} />
           </div>
         </div>

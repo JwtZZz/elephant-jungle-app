@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
+import { useSpriteHoverNews } from '../hooks/useSpriteHoverNews'
 
 const NAV_ITEMS = {
   en: [
@@ -18,7 +19,7 @@ const NAV_ITEMS = {
   ],
 }
 
-export default function Sidebar({ activeView, onSelect, language }) {
+export default function Sidebar({ activeView, onSelect, language, apiBase }) {
   const items = NAV_ITEMS[language] || NAV_ITEMS.en
   const sidebarSpriteTrackRef = useRef(null)
   const sidebarSpriteShellRef = useRef(null)
@@ -27,10 +28,18 @@ export default function Sidebar({ activeView, onSelect, language }) {
     { trackRef: sidebarSpriteTrackRef, shellRef: sidebarSpriteShellRef, direction: 1 },
   ])
 
+  const hoverNews = useSpriteHoverNews(apiBase, 0)
+
   return (
     <aside className="workspace-sidebar">
       <div className="sidebar-pepe-track" ref={sidebarSpriteTrackRef} aria-hidden="true">
-        <div className="sprite-shell facing-right" ref={sidebarSpriteShellRef}>
+        <div
+          className="sprite-shell facing-right"
+          ref={sidebarSpriteShellRef}
+          onMouseEnter={hoverNews.handleMouseEnter}
+          onMouseLeave={hoverNews.handleMouseLeave}
+        >
+          {hoverNews.bubbleText ? <div className="sprite-bubble">{hoverNews.bubbleText}</div> : null}
           <div className={`sprite-avatar ${spriteMode}`} />
         </div>
       </div>

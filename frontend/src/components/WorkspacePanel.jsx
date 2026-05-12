@@ -4,6 +4,7 @@ import AgentsView, { warmTrendingCache } from './AgentsView'
 import WalletView from './WalletView'
 import SettingsView from './SettingsView'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
+import { useSpriteHoverNews } from '../hooks/useSpriteHoverNews'
 
 function EmptyView() {
   return <div className="workspace-empty" aria-hidden="true" />
@@ -16,6 +17,8 @@ export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs
   const { spriteMode } = useSpriteOrbit([
     { trackRef: workspaceSpriteTrackRef, shellRef: workspaceSpriteShellRef, direction: -1 },
   ])
+
+  const hoverNews = useSpriteHoverNews(apiBase, 1)
 
   useEffect(() => {
     warmTrendingCache(apiBase).catch(() => {})
@@ -30,7 +33,11 @@ export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs
   return (
     <section className="workspace-panel">
       <div className="workspace-sprite-track" ref={workspaceSpriteTrackRef} aria-hidden="true">
-        <div className="sprite-shell facing-left" ref={workspaceSpriteShellRef}>
+        <div className="sprite-shell facing-left" ref={workspaceSpriteShellRef}
+          onMouseEnter={hoverNews.handleMouseEnter}
+          onMouseLeave={hoverNews.handleMouseLeave}
+        >
+          {hoverNews.bubbleText ? <div className="sprite-bubble">{hoverNews.bubbleText}</div> : null}
           <div className={`sprite-avatar ${spriteMode}`} />
         </div>
       </div>
