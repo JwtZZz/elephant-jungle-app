@@ -21,6 +21,7 @@ _MARKET_KEYWORDS = [
     "合约", "现货", "期权",
     "gas", "gas费", "手续费",
     "空投", "airdop", "发币",
+    "前景", "值得买", "推荐", "抄底", "上车",
 ]
 
 _KNOWLEDGE_KEYWORDS = [
@@ -41,8 +42,8 @@ _KNOWLEDGE_KEYWORDS = [
 
 _CLASSIFY_PROMPT = """Analyze the user's question about cryptocurrency. Output exactly one word.
 
-market — asks about real-time data: price, chart, trading, news, trending, whales, gas, airdrops
-knowledge — asks about concepts, principles, technical docs, how things work, comparisons, author info
+market — asks about real-time data: price, chart, trading, news, trending, whales, outlook/prospects of specific coins, comparisons of coins' performance
+knowledge — asks about concepts, principles, technical docs, how things work, definitions, author info
 general — greeting, chit-chat, opinions, questions without specific knowledge or data needs
 mixed — needs BOTH real-time data AND knowledge to fully answer (e.g. "how is Bitcoin doing and what is its halving cycle?")
 
