@@ -61,13 +61,24 @@ title_translation_cache: dict[str, str] = {}
 timeline_prewarm_started = False
 OKX_DETAIL_TTL_SECONDS = 3
 okx_detail_cache: dict[str, dict] = {}
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").strip()
+if _cors_origins == "*":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 class IngestRequest(BaseModel):

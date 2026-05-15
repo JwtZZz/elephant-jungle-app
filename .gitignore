@@ -1,21 +1,27 @@
+# Environment
 .env
 *.env
 !.env.example
 
+# Python
 .venv/
-backend/.venv/
+backend/venv/
 node_modules/
 __pycache__/
+.pytest_cache/
 *.pyc
 
+# Database & Vector Store
 backend/rag.db
 backend/chroma/
 
+# OS
 .DS_Store
 Thumbs.db
 
-frontend.log
-frontend.pid
-backend.log
-backend/backend.log
+# Logs & PIDs
+*.log
+*.pid
+
+# Misc
 backend/remote-env.txt
