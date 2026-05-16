@@ -415,9 +415,14 @@ def _build_context(hits: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def chat(query: str, top_k: int = DEFAULT_TOP_K, use_rag: bool = True) -> dict:
+def chat(
+    query: str,
+    top_k: int = DEFAULT_TOP_K,
+    use_rag: bool = True,
+    provider: str | None = None,
+) -> dict:
     if not use_rag:
-        answer = generate_general_answer(query=query)
+        answer = generate_general_answer(query=query, provider=provider)
         return {"answer": answer, "contexts": [], "sources": [], "mode": "general"}
 
     lang = _detect_query_language(query)
@@ -426,12 +431,12 @@ def chat(query: str, top_k: int = DEFAULT_TOP_K, use_rag: bool = True) -> dict:
     sources = build_sources(hits)
 
     if top_score < FALLBACK_SCORE_THRESHOLD:
-        answer = generate_general_answer(query=query)
+        answer = generate_general_answer(query=query, provider=provider)
         answer = f"{answer}\n\n命中分数：{top_score:.3f}"
         return {"answer": answer, "contexts": hits, "sources": sources, "mode": "general"}
 
     context_text = _build_context(hits)
-    answer = generate_answer(query=query, contexts=[context_text])
+    answer = generate_answer(query=query, contexts=[context_text], provider=provider)
     answer = f"{answer}\n\n命中分数：{top_score:.3f}"
     return {"answer": answer, "contexts": hits, "sources": sources, "mode": "rag"}
 
@@ -448,7 +453,12 @@ MEMORY_SUMMARIZER_PROMPT = (
 )
 
 
-def update_memory_summary(old_summary: str, query: str, answer: str) -> str:
+def update_memory_summary(
+    old_summary: str,
+    query: str,
+    answer: str,
+    provider: str | None = None,
+) -> str:
     """Merge old memory summary with the latest Q&A turn into a new summary."""
     messages = [
         {"role": "system", "content": MEMORY_SUMMARIZER_PROMPT},
@@ -462,7 +472,7 @@ def update_memory_summary(old_summary: str, query: str, answer: str) -> str:
         },
     ]
     try:
-        result = _chat_completion_raw(messages, temperature=0.1)
+        result = _chat_completion_raw(messages, temperature=0.1, provider=provider)
         return (result.get("content") or "").strip() or old_summary
     except Exception:
         return old_summary
@@ -485,6 +495,7 @@ def agent_chat(
     memory_summary: str | None = None,
     intent: str | None = None,
     on_event: callable = None,
+    provider: str | None = None,
 ) -> dict:
     """Chat with tool-calling ability (market-data agent).
 
@@ -506,7 +517,7 @@ def agent_chat(
     # Pre-search knowledge base for non-market intents so the LLM
     # doesn't need to decide to call search_knowledge_base.
     kb_context: str | None = None
-    if intent != "market":
+    if intent != "market" and provider != "ollama":
         _emit("status", "正在搜索知识库...")
         try:
             hits = search(query, top_k=3)
@@ -535,7 +546,7 @@ def agent_chat(
 
     for turn in range(MAX_AGENT_TURNS):
         _emit("status", "正在思考下一步操作...")
-        message = _chat_completion_raw(messages, tools=TOOL_DEFINITIONS)
+        message = _chat_completion_raw(messages, tools=TOOL_DEFINITIONS, provider=provider)
         tool_calls = message.get("tool_calls")
 
         if not tool_calls:

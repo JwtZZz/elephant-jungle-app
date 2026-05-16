@@ -792,51 +792,63 @@ def _load_memory(user: dict | None) -> str | None:
 def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) -> dict:
     try:
         intent = None
+        query = req.query
+
+        # // prefix → local Ollama model
+        provider: str | None = None
+        if query.startswith("//"):
+            provider = "ollama"
+            query = query[2:].lstrip()
+
         if req.auto_intent:
-            intent = classify_intent(req.query)
+            intent = classify_intent(query)
 
         if intent == INTENT_GENERAL:
-            result = chat(query=req.query, use_rag=False)
+            result = chat(query=query, use_rag=False, provider=provider)
         elif intent == INTENT_KNOWLEDGE:
-            result = chat(query=req.query, top_k=req.top_k, use_rag=True)
+            result = chat(query=query, top_k=req.top_k, use_rag=True, provider=provider)
         elif intent == INTENT_MARKET:
             history_messages = _build_agent_history(user)
             memory_summary = _load_memory(user)
             result = agent_chat(
-                query=req.query,
+                query=query,
                 history_messages=history_messages,
                 memory_summary=memory_summary,
                 intent=intent,
+                provider=provider,
             )
         elif intent == INTENT_MIXED:
             history_messages = _build_agent_history(user)
             memory_summary = _load_memory(user)
             result = agent_chat(
-                query=req.query,
+                query=query,
                 history_messages=history_messages,
                 memory_summary=memory_summary,
+                provider=provider,
             )
         elif req.use_agent:
             history_messages = _build_agent_history(user)
             memory_summary = _load_memory(user)
             result = agent_chat(
-                query=req.query,
+                query=query,
                 history_messages=history_messages,
                 memory_summary=memory_summary,
+                provider=provider,
             )
         else:
-            result = chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
+            result = chat(query=query, top_k=req.top_k, use_rag=req.use_rag, provider=provider)
 
         if intent:
             result["intent"] = intent
 
         if user:
-            save_chat_message(user["id"], req.query, result.get("answer", ""))
+            save_chat_message(user["id"], query, result.get("answer", ""))
             if intent in (INTENT_MARKET, INTENT_MIXED) or req.use_agent:
                 new_summary = update_memory_summary(
                     old_summary=(_load_memory(user) or ""),
-                    query=req.query,
+                    query=query,
                     answer=result.get("answer", ""),
+                    provider=provider,
                 )
                 if new_summary:
                     save_memory_summary(user["id"], new_summary)
@@ -862,39 +874,50 @@ def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user))
 
         def worker():
             try:
+                query = req.query
+                provider: str | None = None
+                if query.startswith("//"):
+                    provider = "ollama"
+                    query = query[2:].lstrip()
+
+                # 本地模型跳过 RAG
+                use_rag = req.use_rag if provider != "ollama" else False
+
                 intent = None
                 if req.auto_intent:
-                    intent = classify_intent(req.query)
+                    intent = classify_intent(query)
                     event_queue.put(("intent", {"intent": intent, "message": f"意图: {intent}"}))
 
                 if intent == "general":
-                    result = chat(query=req.query, use_rag=False)
+                    result = chat(query=query, use_rag=False, provider=provider)
                     event_queue.put(("answer", {"text": result["answer"]}))
                 elif intent == "knowledge":
-                    result = chat(query=req.query, top_k=req.top_k, use_rag=True)
+                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider)
                     event_queue.put(("answer", {"text": result["answer"]}))
                 elif intent in ("market", "mixed") or req.use_agent:
                     history_messages = _build_agent_history(user)
                     memory_summary = _load_memory(user)
                     result = agent_chat(
-                        query=req.query,
+                        query=query,
                         history_messages=history_messages,
                         memory_summary=memory_summary,
                         intent=intent,
                         on_event=on_event,
+                        provider=provider,
                     )
                     event_queue.put(("answer", {"text": result["answer"]}))
                 else:
-                    result = chat(query=req.query, top_k=req.top_k, use_rag=req.use_rag)
+                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider)
                     event_queue.put(("answer", {"text": result["answer"]}))
 
                 if user:
-                    save_chat_message(user["id"], req.query, result.get("answer", ""))
+                    save_chat_message(user["id"], query, result.get("answer", ""))
                     if intent in ("market", "mixed") or req.use_agent:
                         new_summary = update_memory_summary(
                             old_summary=(_load_memory(user) or ""),
-                            query=req.query,
+                            query=query,
                             answer=result.get("answer", ""),
+                            provider=provider,
                         )
                         if new_summary:
                             save_memory_summary(user["id"], new_summary)

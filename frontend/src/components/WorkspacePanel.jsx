@@ -5,6 +5,7 @@ import WalletView from './WalletView'
 import SettingsView from './SettingsView'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
 import { useSpriteHoverNews } from '../hooks/useSpriteHoverNews'
+import { useAutoCycleBubble } from '../hooks/useAutoCycleBubble'
 
 function EmptyView() {
   return <div className="workspace-empty" aria-hidden="true" />
@@ -14,11 +15,13 @@ export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs
   const workspaceSpriteTrackRef = useRef(null)
   const workspaceSpriteShellRef = useRef(null)
   const [didVisitAgents, setDidVisitAgents] = useState(activeView === 'agents')
-  const { spriteMode } = useSpriteOrbit([
+  const { spriteMode, pauseSprite, resumeSprite } = useSpriteOrbit([
     { trackRef: workspaceSpriteTrackRef, shellRef: workspaceSpriteShellRef, direction: -1 },
   ])
 
   const hoverNews = useSpriteHoverNews(apiBase, 1)
+  const workspaceBubble = useAutoCycleBubble(language)
+  const bubbleText = hoverNews.isHovered ? hoverNews.bubbleText : workspaceBubble
 
   useEffect(() => {
     warmTrendingCache(apiBase).catch(() => {})
@@ -34,10 +37,10 @@ export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs
     <section className="workspace-panel">
       <div className="workspace-sprite-track" ref={workspaceSpriteTrackRef} aria-hidden="true">
         <div className="sprite-shell facing-left" ref={workspaceSpriteShellRef}
-          onMouseEnter={hoverNews.handleMouseEnter}
-          onMouseLeave={hoverNews.handleMouseLeave}
+          onMouseEnter={(e) => { hoverNews.handleMouseEnter(e); pauseSprite(0) }}
+          onMouseLeave={(e) => { hoverNews.handleMouseLeave(e); resumeSprite(0) }}
         >
-          {hoverNews.bubbleText ? <div className="sprite-bubble">{hoverNews.bubbleText}</div> : null}
+          {bubbleText ? <div className="sprite-bubble">{bubbleText}</div> : null}
           <div className={`sprite-avatar ${spriteMode}`} />
         </div>
       </div>

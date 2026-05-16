@@ -38,6 +38,7 @@ export function useSpriteOrbit(spriteSpecs) {
   const randomModeTimerRef = useRef(0)
   const lastTimeRef = useRef(0)
   const progressRef = useRef(spriteSpecs.map((_, index) => (index === 1 ? 9999 : 0)))
+  const pausedRef = useRef(spriteSpecs.map(() => false))
 
   useEffect(() => {
     const tick = (timestamp) => {
@@ -48,6 +49,7 @@ export function useSpriteOrbit(spriteSpecs) {
         if (!sprite.trackRef.current || !sprite.shellRef.current) {
           return
         }
+        if (pausedRef.current[index]) return
         const track = sprite.trackRef.current
         const direction = sprite.direction
         progressRef.current[index] += direction * speedRef.current * (delta / 16)
@@ -104,5 +106,8 @@ export function useSpriteOrbit(spriteSpecs) {
     window.clearTimeout(timerRef.current)
   }
 
-  return { spriteMode: mode, boost, cruise }
+  const pauseSprite = (index) => { pausedRef.current[index] = true }
+  const resumeSprite = (index) => { pausedRef.current[index] = false }
+
+  return { spriteMode: mode, boost, cruise, pauseSprite, resumeSprite }
 }

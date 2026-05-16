@@ -239,7 +239,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const textInputRef = useRef(null)
   const topbarRef = useRef(null)
 
-  const { spriteMode, boost, cruise } = useSpriteOrbit(
+  const { spriteMode, boost, cruise, pauseSprite, resumeSprite } = useSpriteOrbit(
     mobileOnly
       ? [{ trackRef: chatSpriteTrackRef, shellRef: chatSpriteShellRef, direction: 1 }]
       : [
@@ -990,8 +990,8 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       <div className={`chat-stage ${mobileOnly ? 'mobile-chat-stage' : ''}`}>
         <div className="chat-sprite-track" ref={chatSpriteTrackRef} aria-hidden="true">
           <div className="sprite-shell facing-right" ref={chatSpriteShellRef}
-            onMouseEnter={hoverNewsChat.handleMouseEnter}
-            onMouseLeave={hoverNewsChat.handleMouseLeave}
+            onMouseEnter={(e) => { hoverNewsChat.handleMouseEnter(e); pauseSprite(0) }}
+            onMouseLeave={(e) => { hoverNewsChat.handleMouseLeave(e); resumeSprite(0) }}
           >
             {chatBubbleText ? <div className="sprite-bubble">{chatBubbleText}</div> : null}
             <div className={`sprite-avatar ${spriteMode}`} />
@@ -1030,8 +1030,8 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
           {!mobileOnly ? (
             <div className="input-sprite-track" ref={inputSpriteTrackRef} aria-hidden="true">
               <div className="sprite-shell facing-left" ref={inputSpriteShellRef}
-                onMouseEnter={hoverNewsInput.handleMouseEnter}
-                onMouseLeave={hoverNewsInput.handleMouseLeave}
+                onMouseEnter={(e) => { hoverNewsInput.handleMouseEnter(e); pauseSprite(1) }}
+                onMouseLeave={(e) => { hoverNewsInput.handleMouseLeave(e); resumeSprite(1) }}
               >
                 {inputBubbleText ? <div className="sprite-bubble">{inputBubbleText}</div> : null}
                 <div className={`sprite-avatar ${spriteMode}`} />

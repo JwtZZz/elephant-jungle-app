@@ -20,6 +20,8 @@ def _get_chat_provider() -> str:
         return "dashscope"
     if os.getenv("NVIDIA_API_KEY", "").strip():
         return "nvidia"
+    if os.getenv("OLLAMA_BASE_URL", "").strip():
+        return "ollama"
     return "minimax"
 
 
@@ -36,6 +38,8 @@ def validate_provider_env() -> None:
         return
     if provider == "bigmodel":
         _must_env("BIGMODEL_API_KEY")
+        return
+    if provider == "ollama":
         return
     raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
 
@@ -161,16 +165,20 @@ def _dashscope_chat_completion(messages: list[dict], temperature: float = 0.2) -
     raise RuntimeError(f"Bad DashScope response: {payload}")
 
 
-def _chat_completion(messages: list[dict], temperature: float = 0.2) -> str:
-    provider = _get_chat_provider()
+def _chat_completion(
+    messages: list[dict],
+    temperature: float = 0.2,
+    provider: str | None = None,
+) -> str:
+    provider = provider or _get_chat_provider()
     if provider == "dashscope":
         return _dashscope_chat_completion(messages, temperature=temperature)
     if provider == "nvidia":
         return _nvidia_chat_completion(messages, temperature=temperature)
     if provider == "minimax":
         return _minimax_chat_completion(messages, temperature=temperature)
-    # _chat_completion_raw supports bigmodel, reuse it
-    msg = _chat_completion_raw(messages, temperature=temperature)
+    # _chat_completion_raw supports bigmodel and ollama, reuse it
+    msg = _chat_completion_raw(messages, temperature=temperature, provider=provider)
     return (msg.get("content") or "").strip()
 
 
@@ -178,6 +186,7 @@ def _chat_completion_raw(
     messages: list[dict],
     temperature: float = 0.2,
     tools: list[dict] | None = None,
+    provider: str | None = None,
 ) -> dict:
     """Send a chat completion and return the full assistant message dict.
 
@@ -187,9 +196,14 @@ def _chat_completion_raw(
 
     Raises on HTTP / API errors.
     """
-    provider = _get_chat_provider()
+    provider = provider or _get_chat_provider()
 
-    if provider == "dashscope":
+    if provider == "ollama":
+        api_key = "ollama"
+        model = os.getenv("OLLAMA_MODEL", "gemma3:4b").strip()
+        url = (os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip().rstrip("/")
+               + "/v1/chat/completions")
+    elif provider == "dashscope":
         api_key = _must_env("DASHSCOPE_API_KEY")
         model = os.getenv("ALI_CHAT_MODEL", "qwen3.5-flash")
         url = os.getenv(
@@ -233,10 +247,21 @@ def _chat_completion_raw(
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    with httpx.Client(timeout=120) as client:
-        resp = client.post(url, headers=headers, json=data)
-        resp.raise_for_status()
-        payload = resp.json()
+    timeout = httpx.Timeout(60.0, connect=5.0) if provider == "ollama" else httpx.Timeout(120.0)
+
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(url, headers=headers, json=data)
+            resp.raise_for_status()
+            payload = resp.json()
+    except httpx.ConnectError:
+        if provider == "ollama":
+            raise RuntimeError(f"调用本地模型失败（{model}），请检查 Ollama 是否已启动")
+        raise
+    except httpx.TimeoutException:
+        if provider == "ollama":
+            raise RuntimeError(f"调用本地模型超时（{model}），请检查 Ollama 状态")
+        raise
 
     choices = payload.get("choices", [])
     if not choices:
@@ -332,7 +357,7 @@ def ocr_image_data_url(image_data_url: str, prompt: str | None = None) -> str:
     raise RuntimeError("OCR request failed.")
 
 
-def generate_answer(query: str, contexts: list[str]) -> str:
+def generate_answer(query: str, contexts: list[str], provider: str | None = None) -> str:
     context_text = "\n\n".join([f"[{i + 1}] {c}" for i, c in enumerate(contexts)])
     system_prompt = (
         "You are a cryptocurrency and Web3 knowledge assistant. "
@@ -350,11 +375,12 @@ def generate_answer(query: str, contexts: list[str]) -> str:
         [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
-        ]
+        ],
+        provider=provider,
     )
 
 
-def generate_general_answer(query: str) -> str:
+def generate_general_answer(query: str, provider: str | None = None) -> str:
     system_prompt = (
         "You are a helpful assistant. Give clear, direct answers in natural Chinese unless the user asks otherwise. "
         "Do not use Markdown headings, bold markers, bullet lists, or numbered lists unless the user explicitly asks. "
@@ -366,6 +392,7 @@ def generate_general_answer(query: str) -> str:
             {"role": "user", "content": query},
         ],
         temperature=0.5,
+        provider=provider,
     )
 
 

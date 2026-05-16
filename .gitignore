@@ -14,6 +14,7 @@ __pycache__/
 # Database & Vector Store
 backend/rag.db
 backend/chroma/
+backend/briefs_cache.json
 
 # OS
 .DS_Store
@@ -25,3 +26,4 @@ Thumbs.db
 
 # Misc
 backend/remote-env.txt
+LOCAL_MODEL_GUIDE.md

@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
 import { useSpriteHoverNews } from '../hooks/useSpriteHoverNews'
+import { useAutoCycleBubble } from '../hooks/useAutoCycleBubble'
 
 const NAV_ITEMS = {
   en: [
@@ -24,11 +25,13 @@ export default function Sidebar({ activeView, onSelect, language, apiBase }) {
   const sidebarSpriteTrackRef = useRef(null)
   const sidebarSpriteShellRef = useRef(null)
 
-  const { spriteMode } = useSpriteOrbit([
+  const { spriteMode, pauseSprite, resumeSprite } = useSpriteOrbit([
     { trackRef: sidebarSpriteTrackRef, shellRef: sidebarSpriteShellRef, direction: 1 },
   ])
 
   const hoverNews = useSpriteHoverNews(apiBase, 0)
+  const sidebarBubble = useAutoCycleBubble(language)
+  const bubbleText = hoverNews.isHovered ? hoverNews.bubbleText : sidebarBubble
 
   return (
     <aside className="workspace-sidebar">
@@ -36,10 +39,10 @@ export default function Sidebar({ activeView, onSelect, language, apiBase }) {
         <div
           className="sprite-shell facing-right"
           ref={sidebarSpriteShellRef}
-          onMouseEnter={hoverNews.handleMouseEnter}
-          onMouseLeave={hoverNews.handleMouseLeave}
+          onMouseEnter={(e) => { hoverNews.handleMouseEnter(e); pauseSprite(0) }}
+          onMouseLeave={(e) => { hoverNews.handleMouseLeave(e); resumeSprite(0) }}
         >
-          {hoverNews.bubbleText ? <div className="sprite-bubble">{hoverNews.bubbleText}</div> : null}
+          {bubbleText ? <div className="sprite-bubble">{bubbleText}</div> : null}
           <div className={`sprite-avatar ${spriteMode}`} />
         </div>
       </div>
