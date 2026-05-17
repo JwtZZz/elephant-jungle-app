@@ -294,7 +294,7 @@ def chunk_text(
         for kind, block_text in blocks:
             for sub_chunk in _chunk_block(block_text, kind, base_chunk_size, overlap):
                 sub_chunk = sub_chunk.strip()
-                if sub_chunk:
+                if sub_chunk and not re.match(r"^[-*_—\s]{2,}$", sub_chunk):
                     results.append({
                         "text": sub_chunk,
                         "heading_path": heading_path,

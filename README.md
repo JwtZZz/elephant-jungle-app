@@ -2,7 +2,7 @@
 
 > AI-powered cryptocurrency intelligence platform / AI 驱动的加密货币智能平台
 
-![Elephant Jungle workflow demo](assets/readme-workflow-demo.png)
+![Elephant Jungle workflow demo](assets/bsdiasdi.png)
 
 ---
 

@@ -166,6 +166,7 @@ def _dashscope_chat_completion(messages: list[dict], temperature: float = 0.2) -
 
 
 def _chat_completion(
+    messages: list[dict],
     temperature: float = 0.2,
     provider: str | None = None,
 ) -> str:
@@ -362,7 +363,6 @@ def generate_answer(query: str, contexts: list[str], provider: str | None = None
         "You are a cryptocurrency and Web3 knowledge assistant. "
         "Answer in natural Chinese with a warm, human tone. "
         "Use the provided reference material to answer the question. "
-        "Cite sources by their number in brackets, e.g. [1] [2]. "
         "If the provided material does not contain enough information to answer reliably, "
         "say so honestly - do not invent facts or speculate beyond the references. "
         "Do not use Markdown headings, bold markers, bullet lists, or numbered lists "
