@@ -21,6 +21,9 @@ const COPY = {
     ocrReady: 'OCR ready',
     ocrFailed: 'OCR failed',
     ocrNoText: 'No text found in image.',
+    workCreated: 'Task created and saved in Work.',
+    workConfirmHint: 'Reply "confirm" to save this task in Work.',
+    workLoginRequired: 'Please login first. Work tasks are tied to your account and email.',
   },
   zh: {
     welcome: "Hello, I'm your Elephant Jungle assistant. 你好，请问需要什么帮助？",
@@ -39,6 +42,9 @@ const COPY = {
     ocrReady: '识别完成',
     ocrFailed: '识别失败',
     ocrNoText: '图片里没有识别到文字。',
+    workCreated: '任务已创建，并已保存到 Work。',
+    workConfirmHint: '回复“确认”就会保存到 Work。',
+    workLoginRequired: '请先登录。Work 任务会绑定到你的账号和邮箱。',
   },
 }
 
@@ -99,6 +105,28 @@ function MessageActions({ copyLabel, copiedLabel, query, onRetry, retryLabel, te
   )
 }
 
+function isWorkConfirmIntent(text) {
+  const normalized = String(text || '').trim().toLowerCase()
+  return ['confirm', 'yes', 'ok', 'create it', 'save it', '确认', '确定', '创建', '保存'].includes(normalized)
+}
+
+function isWorkTaskIntent(text) {
+  const normalized = String(text || '').toLowerCase()
+  const hasWorkVerb = /(email|mail|alert|notify|remind|提醒|通知|邮件|发邮件|记录|创建任务|任务)/i.test(text)
+  const hasTrigger = /(when|if|below|above|under|over|drop|drops|rise|rises|当|如果|跌破|低于|涨破|高于|超过)/i.test(text)
+  const hasPrice = /(\d+(?:\.\d+)?\s*(usd|usdt|美元|u)?|\$)/i.test(text)
+  const mentionsWork = normalized.includes('work')
+  return (hasWorkVerb && hasTrigger && hasPrice) || (mentionsWork && hasTrigger)
+}
+
+async function readJsonResponse(response, fallbackMessage) {
+  const contentType = response.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    throw new Error(fallbackMessage)
+  }
+  return response.json()
+}
+
 export default function ChatPanel({ apiBase, language }) {
   const copy = COPY[language] || COPY.en
   const [messages, setMessages] = useState([])
@@ -116,6 +144,8 @@ export default function ChatPanel({ apiBase, language }) {
   const activeRunIdRef = useRef(0)
   const activeBotIdRef = useRef(null)
   const fileInputRef = useRef(null)
+  const workSessionRef = useRef('')
+  const workDraftRef = useRef(null)
 
   const { spriteMode, boost, cruise } = useSpriteOrbit([
     { trackRef: chatSpriteTrackRef, shellRef: chatSpriteShellRef, direction: 1 },
@@ -141,6 +171,54 @@ export default function ChatPanel({ apiBase, language }) {
     }, REQUEST_TIMEOUT_MS)
 
     try {
+      const storedToken = window.localStorage.getItem('elephant_auth_token') || ''
+      const authHeaders = { 'Content-Type': 'application/json' }
+      if (storedToken) {
+        authHeaders.Authorization = `Bearer ${storedToken}`
+      }
+
+      if (isWorkConfirmIntent(query) && workSessionRef.current && workDraftRef.current) {
+        const response = await fetch(`${apiBase}/work/tasks/confirm`, {
+          method: 'POST',
+          headers: authHeaders,
+          credentials: 'include',
+          signal: controller.signal,
+          body: JSON.stringify({ session_id: workSessionRef.current }),
+        })
+        const payload = await readJsonResponse(response, copy.requestFailed)
+        if (!response.ok) {
+          if (response.status === 401) throw new Error(copy.workLoginRequired)
+          throw new Error(payload.detail || copy.requestFailed)
+        }
+        workSessionRef.current = ''
+        workDraftRef.current = null
+        window.dispatchEvent(new CustomEvent('work-tasks-updated', { detail: payload.task }))
+        return copy.workCreated
+      }
+
+      if (isWorkTaskIntent(query)) {
+        const response = await fetch(`${apiBase}/work/assistant/message`, {
+          method: 'POST',
+          headers: authHeaders,
+          credentials: 'include',
+          signal: controller.signal,
+          body: JSON.stringify({
+            session_id: workSessionRef.current || undefined,
+            message: query,
+            language,
+          }),
+        })
+        const payload = await readJsonResponse(response, copy.requestFailed)
+        if (!response.ok) {
+          if (response.status === 401) throw new Error(copy.workLoginRequired)
+          throw new Error(payload.detail || copy.requestFailed)
+        }
+        workSessionRef.current = payload.session_id || ''
+        workDraftRef.current = payload.draft_task || null
+        const assistantMessage = payload.assistant_message || copy.noAnswer
+        return payload.needs_confirmation ? `${assistantMessage}\n\n${copy.workConfirmHint}` : assistantMessage
+      }
+
       const response = await fetch(`${apiBase}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

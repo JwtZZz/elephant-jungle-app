@@ -35,6 +35,14 @@ from providers import ocr_image_data_url, translate_text, validate_provider_env
 from cache_store import get_json as cache_get_json, redis_status, set_json as cache_set_json
 from task_broker import get_job_status, publish_ingest_job, rabbitmq_status, start_ingest_worker
 from pump import create_token as pump_create_token, load_metadata as pump_load_metadata
+from work_service import (
+    cancel_user_work_task,
+    confirm_work_task,
+    get_user_work_task,
+    handle_work_assistant_message,
+    list_user_work_tasks,
+    start_work_runtime,
+)
 
 
 app = FastAPI(title="Minimal RAG Backend", version="0.1.0")
@@ -61,7 +69,10 @@ title_translation_cache: dict[str, str] = {}
 timeline_prewarm_started = False
 OKX_DETAIL_TTL_SECONDS = 3
 okx_detail_cache: dict[str, dict] = {}
-_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").strip()
+_cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:5500,http://127.0.0.1:5500,http://156.238.244.183,http://156.238.244.183:5500",
+).strip()
 if _cors_origins == "*":
     app.add_middleware(
         CORSMiddleware,
@@ -75,6 +86,7 @@ else:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
+        allow_origin_regex=r"https?://[^/:]+(?::(5173|4173|5500))?",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -122,6 +134,16 @@ class SendCodeRequest(BaseModel):
 class VerifyCodeRequest(BaseModel):
     email: str
     code: str
+
+
+class WorkAssistantMessageRequest(BaseModel):
+    message: str
+    session_id: str | None = None
+    language: str | None = "en"
+
+
+class WorkConfirmRequest(BaseModel):
+    session_id: str
 
 
 def get_current_user(
@@ -662,6 +684,7 @@ def on_startup() -> None:
     validate_provider_env()
     start_timeline_prewarm()
     start_ingest_worker(process_ingest_payload)
+    start_work_runtime()
 
 
 @app.get("/market/timeline/prewarm")
@@ -733,6 +756,99 @@ def chat_history(user: dict | None = Depends(get_current_user)) -> dict:
         return {"messages": []}
     messages = get_chat_history(user["id"])
     return {"messages": messages}
+
+
+@app.post("/work/assistant/message")
+def work_assistant_message(
+    req: WorkAssistantMessageRequest,
+    user: dict | None = Depends(get_current_user),
+) -> dict:
+    try:
+        if user is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return handle_work_assistant_message(
+            user=user,
+            message=req.message,
+            session_id=req.session_id,
+            language=req.language,
+        )
+    except HTTPException:
+        raise
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/work/tasks/confirm")
+def work_tasks_confirm(
+    req: WorkConfirmRequest,
+    user: dict | None = Depends(get_current_user),
+) -> dict:
+    try:
+        if user is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        task = confirm_work_task(user=user, session_id=req.session_id)
+        return {"task": task}
+    except HTTPException:
+        raise
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/work/tasks")
+def work_tasks(
+    include_completed: bool = Query(False),
+    user: dict | None = Depends(get_current_user),
+) -> dict:
+    try:
+        if user is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return {"tasks": list_user_work_tasks(user, include_completed=include_completed)}
+    except HTTPException:
+        raise
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/work/tasks/{task_id}")
+def work_task_detail(task_id: str, user: dict | None = Depends(get_current_user)) -> dict:
+    try:
+        if user is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return {"task": get_user_work_task(user, task_id)}
+    except HTTPException:
+        raise
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/work/tasks/{task_id}/cancel")
+def work_task_cancel(task_id: str, user: dict | None = Depends(get_current_user)) -> dict:
+    try:
+        if user is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return {"task": cancel_user_work_task(user, task_id)}
+    except HTTPException:
+        raise
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/ingest")

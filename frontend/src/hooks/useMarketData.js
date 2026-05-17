@@ -5,16 +5,27 @@ const MARKET_REFRESH_MS = 3000
 const BRIEFS_REFRESH_MS = 5 * 60 * 60 * 1000
 
 function getApiBase() {
+  const configuredBase = import.meta.env?.VITE_API_BASE?.trim()
+  if (configuredBase) {
+    return configuredBase.replace(/\/$/, '')
+  }
+
   const hostname = window.location.hostname || '127.0.0.1'
+  const port = window.location.port || ''
+  const frontendOnlyPorts = new Set(['5173', '4173', '5500'])
   if (
     hostname === 'localhost' ||
     hostname === '127.0.0.1' ||
-    hostname === '0.0.0.0'
+    hostname === '0.0.0.0' ||
+    frontendOnlyPorts.has(port)
   ) {
     return `${window.location.protocol}//${hostname}:8000`
   }
   if (hostname.endsWith('trycloudflare.com')) {
     return window.location.origin
+  }
+  if (window.location.protocol === 'http:' && port !== '8000') {
+    return `${window.location.protocol}//${hostname}:8000`
   }
   return window.location.origin
 }

@@ -3,6 +3,7 @@ import MarketsView from './MarketsView'
 import AgentsView, { warmTrendingCache } from './AgentsView'
 import WalletView from './WalletView'
 import SettingsView from './SettingsView'
+import WorkView from './WorkView'
 import { useSpriteOrbit } from '../hooks/useSpriteOrbit'
 import { useSpriteHoverNews } from '../hooks/useSpriteHoverNews'
 import { useAutoCycleBubble } from '../hooks/useAutoCycleBubble'
@@ -51,8 +52,9 @@ export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs
         </div>
       ) : null}
       {activeView === 'research' ? <SettingsView language={language} setLanguage={setLanguage} /> : null}
+      {activeView === 'work' ? <WorkView apiBase={apiBase} language={language} /> : null}
       {activeView === 'wallet' ? <WalletView apiBase={apiBase} language={language} /> : null}
-      {!['markets', 'agents', 'research', 'wallet'].includes(activeView) ? <EmptyView /> : null}
+      {!['markets', 'agents', 'research', 'work', 'wallet'].includes(activeView) ? <EmptyView /> : null}
     </section>
   )
 }

@@ -15,6 +15,7 @@ from cache_store import get_json, set_json
 
 _memory_jobs: dict[str, dict] = {}
 _worker_started = False
+_work_worker_started = False
 
 
 def _queue_name() -> str:
@@ -23,6 +24,10 @@ def _queue_name() -> str:
 
 def _rabbitmq_url() -> str:
     return os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/%2F").strip()
+
+
+def _work_queue_name() -> str:
+    return os.getenv("RABBITMQ_WORK_QUEUE", "elephant.work.tasks").strip() or "elephant.work.tasks"
 
 
 def _connect():
@@ -127,3 +132,58 @@ def rabbitmq_status() -> dict:
         return {"enabled": True, "ok": True, "queue": _queue_name(), "worker_started": _worker_started}
     except Exception as exc:
         return {"enabled": True, "ok": False, "queue": _queue_name(), "error": str(exc)}
+
+
+def publish_work_job(payload: dict) -> dict:
+    message = {"payload": payload, "published_at": int(time.time())}
+    connection = _connect()
+    try:
+        channel = connection.channel()
+        channel.queue_declare(queue=_work_queue_name(), durable=True)
+        channel.basic_publish(
+            exchange="",
+            routing_key=_work_queue_name(),
+            body=json.dumps(message, ensure_ascii=False).encode("utf-8"),
+            properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+        )
+    finally:
+        connection.close()
+    return {"queued": True, "queue": _work_queue_name()}
+
+
+def start_work_worker(handler: Callable[[dict], dict]) -> bool:
+    global _work_worker_started
+    if _work_worker_started:
+        return False
+    enabled = os.getenv("RABBITMQ_WORKER_ENABLED", "true").strip().lower() not in {"0", "false", "no"}
+    if not enabled:
+        return False
+    _work_worker_started = True
+
+    def run() -> None:
+        while True:
+            try:
+                connection = _connect()
+                channel = connection.channel()
+                channel.queue_declare(queue=_work_queue_name(), durable=True)
+                channel.basic_qos(prefetch_count=1)
+
+                def on_message(ch, method, properties, body) -> None:
+                    try:
+                        message = json.loads(body.decode("utf-8"))
+                        payload = message.get("payload") or {}
+                        handler(payload)
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                    except Exception as exc:
+                        print(f"Work queue message failed: {exc}")
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+
+                channel.basic_consume(queue=_work_queue_name(), on_message_callback=on_message)
+                channel.start_consuming()
+            except Exception as exc:
+                print(f"RabbitMQ work worker reconnecting after error: {exc}")
+                time.sleep(5)
+
+    thread = threading.Thread(target=run, name="rabbitmq-work-worker", daemon=True)
+    thread.start()
+    return True

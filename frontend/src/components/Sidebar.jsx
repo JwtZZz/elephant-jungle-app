@@ -8,15 +8,17 @@ const NAV_ITEMS = {
     { key: 'markets', label: 'Markets', index: '01' },
     { key: 'agents', label: 'meme pump', index: '02' },
     { key: 'policy', label: 'Tbot', index: '03' },
-    { key: 'wallet', label: 'My Wallet', index: '04' },
-    { key: 'research', label: 'Setting', index: '05' },
+    { key: 'work', label: 'Work', index: '04' },
+    { key: 'wallet', label: 'My Wallet', index: '05' },
+    { key: 'research', label: 'Setting', index: '06' },
   ],
   zh: [
     { key: 'markets', label: '市场', index: '01' },
     { key: 'agents', label: 'meme pump', index: '02' },
     { key: 'policy', label: 'Tbot', index: '03' },
-    { key: 'wallet', label: '我的钱包', index: '04' },
-    { key: 'research', label: '设置', index: '05' },
+    { key: 'work', label: 'Work', index: '04' },
+    { key: 'wallet', label: '我的钱包', index: '05' },
+    { key: 'research', label: '设置', index: '06' },
   ],
 }
 

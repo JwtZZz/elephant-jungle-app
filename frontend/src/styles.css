@@ -1738,6 +1738,209 @@ button, input { font: inherit; }
   color: var(--accent);
 }
 
+.work-view {
+  gap: 0;
+}
+
+.work-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+}
+
+.work-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.work-title {
+  margin-top: 8px;
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: clamp(30px, 3vw, 48px);
+  line-height: 1.02;
+}
+
+.work-subtitle {
+  margin-top: 10px;
+  max-width: 680px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.work-login-state,
+.work-feedback,
+.work-empty {
+  border: 1px solid var(--border-warm);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-toggle-active) 38%, var(--bg-surface));
+  color: var(--text-secondary);
+  padding: 13px 14px;
+  font-size: 13px;
+}
+
+.work-feedback {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border-warm));
+  color: var(--accent);
+}
+
+.work-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-toggle-active) 34%, var(--bg-surface));
+  box-shadow: inset 0 0 0 1px var(--shadow-lift);
+}
+
+.work-composer input {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 0 14px;
+  outline: none;
+}
+
+.work-composer input::placeholder {
+  color: var(--text-muted);
+}
+
+.work-composer input:disabled {
+  opacity: 0.62;
+}
+
+.work-composer button,
+.work-draft-card button,
+.work-cancel-btn {
+  min-height: 48px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border-warm));
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fffefb;
+  padding: 0 18px;
+  cursor: pointer;
+}
+
+.work-composer button:disabled,
+.work-draft-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.work-assistant-card,
+.work-draft-card,
+.work-task-row {
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-surface) 86%, var(--bg-toggle-active));
+  box-shadow: 0 4px 24px var(--shadow-soft);
+}
+
+.work-assistant-card {
+  padding: 18px;
+}
+
+.work-assistant-label,
+.work-section-title {
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.work-assistant-card p {
+  margin-top: 8px;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.work-draft-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+}
+
+.work-draft-main,
+.work-task-copy {
+  min-width: 0;
+}
+
+.work-draft-title,
+.work-task-title {
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.work-draft-meta,
+.work-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.work-draft-meta span,
+.work-task-meta span {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-warm);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-toggle-active) 42%, transparent);
+  color: var(--text-secondary);
+  padding: 0 10px;
+  font-size: 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.work-task-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.work-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.work-task-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 15px;
+}
+
+.work-task-error {
+  margin-top: 10px;
+  color: #b53333;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.work-cancel-btn {
+  min-height: 40px;
+  background: transparent;
+  color: var(--accent);
+}
+
 .market-shell {
   display: flex;
   flex-direction: column;
@@ -4263,6 +4466,13 @@ input:focus {
   .launch-form-grid { grid-template-columns: 1fr; }
   .settings-card { padding: 20px; }
   .settings-title { font-size: 30px; }
+  .work-composer,
+  .work-draft-card,
+  .work-task-row { grid-template-columns: 1fr; }
+  .work-composer button,
+  .work-draft-card button,
+  .work-cancel-btn { width: 100%; }
+  .work-title { font-size: 30px; }
   .market-home-layout { grid-template-columns: 1fr; }
   .market-home-hero { grid-template-columns: 1fr; }
   .market-home-main {

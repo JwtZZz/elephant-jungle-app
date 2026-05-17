@@ -166,7 +166,6 @@ def _dashscope_chat_completion(messages: list[dict], temperature: float = 0.2) -
 
 
 def _chat_completion(
-    messages: list[dict],
     temperature: float = 0.2,
     provider: str | None = None,
 ) -> str:

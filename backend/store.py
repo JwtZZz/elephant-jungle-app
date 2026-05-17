@@ -2,6 +2,7 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Iterable
+import uuid
 
 import chromadb
 
@@ -126,6 +127,48 @@ def init_db() -> None:
         ensure_columns(conn, "documents", DOCUMENT_COLUMNS)
         ensure_columns(conn, "chunks", CHUNK_COLUMNS)
         ensure_columns(conn, "users", {"memory_summary": "TEXT DEFAULT ''"})
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS work_sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                workflow_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS work_tasks (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                user_email TEXT NOT NULL,
+                workflow_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL,
+                asset_symbol TEXT NOT NULL,
+                operator TEXT NOT NULL,
+                threshold_value REAL NOT NULL,
+                threshold_currency TEXT NOT NULL,
+                recipient_email TEXT NOT NULL,
+                email_subject TEXT NOT NULL,
+                email_template_payload TEXT NOT NULL DEFAULT '{}',
+                last_checked_at TEXT,
+                last_price REAL,
+                last_triggered_at TEXT,
+                last_error TEXT,
+                next_check_at INTEGER,
+                locked_until INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
 
 
 def insert_document(
@@ -416,3 +459,268 @@ def get_chat_history(user_id: int, limit: int = 100) -> list[dict]:
             (user_id, limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _json_dumps(payload: dict) -> str:
+    return json.dumps(payload or {}, ensure_ascii=False)
+
+
+def _json_loads(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _hydrate_work_session(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["state"] = _json_loads(data.pop("state_json", ""))
+    return data
+
+
+def _hydrate_work_task(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["email_template_payload"] = _json_loads(data.get("email_template_payload"))
+    return data
+
+
+def create_work_session(user_id: int, workflow_type: str, status: str, state: dict) -> dict:
+    session_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO work_sessions(id, user_id, workflow_type, status, state_json)
+            VALUES(?, ?, ?, ?, ?)
+            """,
+            (session_id, user_id, workflow_type, status, _json_dumps(state)),
+        )
+        row = conn.execute(
+            """
+            SELECT id, user_id, workflow_type, status, state_json, created_at, updated_at
+            FROM work_sessions
+            WHERE id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+    return _hydrate_work_session(row)
+
+
+def get_work_session(session_id: str, user_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, user_id, workflow_type, status, state_json, created_at, updated_at
+            FROM work_sessions
+            WHERE id = ? AND user_id = ?
+            """,
+            (session_id, user_id),
+        ).fetchone()
+    return _hydrate_work_session(row)
+
+
+def update_work_session(session_id: str, user_id: int, *, status: str, state: dict) -> dict | None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE work_sessions
+            SET status = ?, state_json = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ?
+            """,
+            (status, _json_dumps(state), session_id, user_id),
+        )
+        row = conn.execute(
+            """
+            SELECT id, user_id, workflow_type, status, state_json, created_at, updated_at
+            FROM work_sessions
+            WHERE id = ? AND user_id = ?
+            """,
+            (session_id, user_id),
+        ).fetchone()
+    return _hydrate_work_session(row)
+
+
+def create_work_task(
+    *,
+    user_id: int,
+    user_email: str,
+    workflow_type: str,
+    title: str,
+    status: str,
+    asset_symbol: str,
+    operator: str,
+    threshold_value: float,
+    threshold_currency: str,
+    recipient_email: str,
+    email_subject: str,
+    email_template_payload: dict,
+    next_check_at: int | None = None,
+) -> dict:
+    task_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO work_tasks(
+                id, user_id, user_email, workflow_type, title, status, asset_symbol, operator,
+                threshold_value, threshold_currency, recipient_email, email_subject,
+                email_template_payload, next_check_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                user_id,
+                user_email,
+                workflow_type,
+                title,
+                status,
+                asset_symbol,
+                operator,
+                threshold_value,
+                threshold_currency,
+                recipient_email,
+                email_subject,
+                _json_dumps(email_template_payload),
+                next_check_at,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM work_tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+    return _hydrate_work_task(row)
+
+
+def get_work_task(task_id: str, user_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM work_tasks WHERE id = ? AND user_id = ?",
+            (task_id, user_id),
+        ).fetchone()
+    return _hydrate_work_task(row)
+
+
+def get_work_task_by_id(task_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM work_tasks WHERE id = ?", (task_id,)).fetchone()
+    return _hydrate_work_task(row)
+
+
+def list_work_tasks(user_id: int, include_completed: bool = False) -> list[dict]:
+    statuses = ("active", "failed", "waiting_for_input", "waiting_for_confirmation")
+    query = "SELECT * FROM work_tasks WHERE user_id = ?"
+    params: list = [user_id]
+    if not include_completed:
+        query += f" AND status IN ({','.join('?' for _ in statuses)})"
+        params.extend(statuses)
+    query += " ORDER BY updated_at DESC, created_at DESC"
+    with get_conn() as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+    return [_hydrate_work_task(row) for row in rows]
+
+
+def cancel_work_task(task_id: str, user_id: int) -> dict | None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE work_tasks
+            SET status = 'canceled', locked_until = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ? AND status != 'completed'
+            """,
+            (task_id, user_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM work_tasks WHERE id = ? AND user_id = ?",
+            (task_id, user_id),
+        ).fetchone()
+    return _hydrate_work_task(row)
+
+
+def claim_due_work_tasks(now_ts: int, *, limit: int = 16, lock_seconds: int = 90) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id
+            FROM work_tasks
+            WHERE status = 'active'
+              AND (next_check_at IS NULL OR next_check_at <= ?)
+              AND (locked_until IS NULL OR locked_until < ?)
+            ORDER BY COALESCE(next_check_at, 0) ASC, created_at ASC
+            LIMIT ?
+            """,
+            (now_ts, now_ts, limit),
+        ).fetchall()
+        task_ids = [row["id"] for row in rows]
+        claimed: list[str] = []
+        for task_id in task_ids:
+            cursor = conn.execute(
+                """
+                UPDATE work_tasks
+                SET locked_until = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND status = 'active'
+                  AND (locked_until IS NULL OR locked_until < ?)
+                """,
+                (now_ts + lock_seconds, task_id, now_ts),
+            )
+            if cursor.rowcount:
+                claimed.append(task_id)
+        if not claimed:
+            return []
+        placeholders = ",".join("?" for _ in claimed)
+        claimed_rows = conn.execute(
+            f"SELECT * FROM work_tasks WHERE id IN ({placeholders})",
+            tuple(claimed),
+        ).fetchall()
+    return [_hydrate_work_task(row) for row in claimed_rows]
+
+
+def update_work_task_runtime(
+    task_id: str,
+    *,
+    status: str | None = None,
+    last_checked_at: str | None = None,
+    last_price: float | None = None,
+    last_triggered_at: str | None = None,
+    last_error: str | None = None,
+    next_check_at: int | None = None,
+    locked_until: int | None = None,
+) -> dict | None:
+    assignments = []
+    params: list = []
+    for key, value in (
+        ("status", status),
+        ("last_checked_at", last_checked_at),
+        ("last_price", last_price),
+        ("last_triggered_at", last_triggered_at),
+        ("last_error", last_error),
+        ("next_check_at", next_check_at),
+        ("locked_until", locked_until),
+    ):
+        if value is not None:
+            assignments.append(f"{key} = ?")
+            params.append(value)
+    assignments.append("updated_at = CURRENT_TIMESTAMP")
+    params.append(task_id)
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE work_tasks SET {', '.join(assignments)} WHERE id = ?",
+            tuple(params),
+        )
+        row = conn.execute("SELECT * FROM work_tasks WHERE id = ?", (task_id,)).fetchone()
+    return _hydrate_work_task(row)
+
+
+def clear_work_task_lock(task_id: str, *, last_error: str | None = None, next_check_at: int | None = None) -> dict | None:
+    return update_work_task_runtime(
+        task_id,
+        last_error=last_error,
+        next_check_at=next_check_at,
+        locked_until=0,
+    )

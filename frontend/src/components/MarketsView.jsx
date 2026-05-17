@@ -68,6 +68,7 @@ const COPY = {
     whaleUsd: 'USD',
     whaleLoading: 'Loading whale transfers...',
     whaleEmpty: 'No whale transfers were returned yet.',
+    whaleError: 'Whale feed could not load. Check the API connection.',
     whaleCache: 'Redis · 10s cache',
   },
   zh: {
@@ -130,6 +131,7 @@ const COPY = {
     whaleUsd: '美元',
     whaleLoading: '正在加载巨鲸转账...',
     whaleEmpty: '暂时还没有抓到新的巨鲸转账。',
+    whaleError: '巨鲸流向加载失败，请检查 API 连接。',
     whaleCache: 'Redis · 10 秒缓存',
   },
 }
@@ -327,9 +329,18 @@ function buildStatRows(items) {
   ))
 }
 
+async function readApiJson(response, label) {
+  const contentType = response.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    throw new Error(`${label} returned a web page instead of JSON`)
+  }
+  return response.json()
+}
+
 function WhaleTerminalPanel({ apiBase, copy, language, marketRows }) {
   const [items, setItems] = useState(() => readWhaleFeedCache())
   const [loading, setLoading] = useState(() => !readWhaleFeedCache().length)
+  const [error, setError] = useState('')
   const [copiedKey, setCopiedKey] = useState('')
   const tokenIcons = useMemo(() => buildTokenIconMap(marketRows), [marketRows])
 
@@ -345,14 +356,16 @@ function WhaleTerminalPanel({ apiBase, copy, language, marketRows }) {
       try {
         const response = await fetch(`${apiBase}/whales/feed?limit=16`)
         if (!response.ok) throw new Error(`whale feed failed (${response.status})`)
-        const payload = await response.json()
+        const payload = await readApiJson(response, 'whale feed')
         const nextItems = Array.isArray(payload.items) ? payload.items : []
         if (!ignore && nextItems.length) {
           setItems(nextItems)
+          setError('')
           writeWhaleFeedCache(nextItems)
         }
       } catch (error) {
         console.error('Whale feed fallback', error)
+        if (!ignore) setError(error.message || copy.whaleError)
       } finally {
         if (!ignore) setLoading(false)
       }
@@ -399,7 +412,8 @@ function WhaleTerminalPanel({ apiBase, copy, language, marketRows }) {
 
       <div className="whale-terminal-table whale-terminal-table-single">
         {loading && !items.length ? <div className="whale-terminal-empty">{copy.whaleLoading}</div> : null}
-        {!loading && !items.length ? <div className="whale-terminal-empty">{copy.whaleEmpty}</div> : null}
+        {!loading && !items.length && error ? <div className="whale-terminal-empty">{copy.whaleError}</div> : null}
+        {!loading && !items.length && !error ? <div className="whale-terminal-empty">{copy.whaleEmpty}</div> : null}
         {items.map((item, index) => {
           const inflow = String(item.direction || '').toLowerCase() === 'inflow'
           const fromKey = `${item.fromAddress}-${index}-from`

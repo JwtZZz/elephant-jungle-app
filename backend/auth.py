@@ -72,6 +72,19 @@ def verify_code(email: str, code: str) -> bool:
 
 
 def send_verification_email(email: str, code: str) -> None:
+    subject = "Elephant Jungle verification code"
+    html = (
+        "<div style='font-family:sans-serif;padding:24px;max-width:480px'>"
+        "<h2>Elephant Jungle</h2>"
+        f"<p>Your verification code is:</p>"
+        f"<div style='font-size:32px;letter-spacing:6px;font-weight:bold;padding:16px 0'>{code}</div>"
+        f"<p style='color:#666'>This code expires in 5 minutes.</p>"
+        "</div>"
+    )
+    send_email(email=email, subject=subject, html=html)
+
+
+def send_email(email: str, subject: str, html: str, text: str | None = None) -> None:
     api_key = os.getenv("RESEND_API_KEY", "").strip()
     if api_key:
         try:
@@ -88,18 +101,12 @@ def send_verification_email(email: str, code: str) -> None:
                 params={
                     "from": sender,
                     "to": [email],
-                    "subject": "Elephant Jungle verification code",
-                    "html": (
-                        "<div style='font-family:sans-serif;padding:24px;max-width:480px'>"
-                        "<h2>Elephant Jungle</h2>"
-                        f"<p>Your verification code is:</p>"
-                        f"<div style='font-size:32px;letter-spacing:6px;font-weight:bold;padding:16px 0'>{code}</div>"
-                        f"<p style='color:#666'>This code expires in 5 minutes.</p>"
-                        "</div>"
-                    ),
+                    "subject": subject,
+                    "html": html,
+                    **({"text": text} if text else {}),
                 }
             )
         except Exception as exc:
             print(f"Resend failed for {email}: {exc}")
     else:
-        print(f"\n=== DEV MODE: verification code for {email} -> {code} ===\n")
+        print(f"\n=== DEV MODE: email to {email} | {subject} ===\n{text or html}\n")
