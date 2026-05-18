@@ -241,6 +241,9 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState('')
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyOffset, setHistoryOffset] = useState(0)
+  const [hasMoreHistory, setHasMoreHistory] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [guestChatUsed, setGuestChatUsed] = useState(false)
   const [messages, setMessages] = useState([])
   const [inputValue, setInputValue] = useState('')
@@ -255,6 +258,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       : ['BTC move', 'ETF flow', 'ETH watch', 'Meme heat'],
   )
   const chatBoxRef = useRef(null)
+  const historySentinelRef = useRef(null)
   const chatSpriteTrackRef = useRef(null)
   const chatSpriteShellRef = useRef(null)
   const inputSpriteTrackRef = useRef(null)
@@ -742,11 +746,9 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
 
   const loadChatHistory = useCallback(async () => {
     const token = window.localStorage.getItem('elephant_auth_token')
-    if (!token) return
+    const headers = token ? { Authorization: `Bearer ${token}` } : {}
     try {
-      const response = await fetch(`${apiBase}/chat/history`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      const response = await fetch(`${apiBase}/chat/history?limit=10&offset=0`, { headers })
       if (!response.ok) return
       const data = await response.json()
       const history = []
@@ -771,11 +773,78 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       if (history.length) {
         setMessages(history)
         setHistoryLoaded(true)
+        setHistoryOffset(data.messages.length)
+        setHasMoreHistory(data.total > data.messages.length)
       }
     } catch {
       // silently fail
     }
   }, [apiBase])
+
+  const loadMoreMessages = useCallback(async () => {
+    if (loadingMore || !hasMoreHistory) return
+    setLoadingMore(true)
+    const token = window.localStorage.getItem('elephant_auth_token')
+    const headers = token ? { Authorization: `Bearer ${token}` } : {}
+    try {
+      const response = await fetch(`${apiBase}/chat/history?limit=10&offset=${historyOffset}`, { headers })
+      if (!response.ok) return
+      const data = await response.json()
+      const older = []
+      for (const msg of (data.messages || [])) {
+        older.push({
+          id: `hist-user-${msg.id}`,
+          role: 'user',
+          text: msg.user_content,
+          query: '',
+          hideActions: true,
+          hiddenWhilePending: false,
+        })
+        older.push({
+          id: `hist-bot-${msg.id}`,
+          role: 'bot',
+          text: msg.bot_content,
+          query: msg.user_content || '',
+          hideActions: true,
+          hiddenWhilePending: false,
+        })
+      }
+      if (older.length) {
+        const prevScrollHeight = chatBoxRef.current?.scrollHeight || 0
+        setMessages(prev => [...older, ...prev])
+        setHistoryOffset(prev => prev + data.messages.length)
+        setHasMoreHistory(data.total > historyOffset + data.messages.length)
+        requestAnimationFrame(() => {
+          if (chatBoxRef.current) {
+            chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight - prevScrollHeight
+          }
+        })
+      } else {
+        setHasMoreHistory(false)
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [apiBase, historyOffset, hasMoreHistory, loadingMore])
+
+  // IntersectionObserver for scroll-to-top lazy load
+  useEffect(() => {
+    const sentinel = historySentinelRef.current
+    const chatBox = chatBoxRef.current
+    if (!sentinel || !chatBox || !hasMoreHistory) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasMoreHistory && !loadingMore) {
+          loadMoreMessages()
+        }
+      },
+      { root: chatBox, threshold: 0.1 },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMoreHistory, loadingMore, loadMoreMessages])
 
   useEffect(() => {
     if (authToken && !historyLoaded) {
@@ -1076,6 +1145,11 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
           </div>
         </div>
         <div className="chat-box" ref={chatBoxRef}>
+          {hasMoreHistory ? (
+            <div ref={historySentinelRef} className="history-sentinel">
+              {loadingMore ? (language === 'zh' ? '加载中...' : 'Loading...') : (language === 'zh' ? '↑ 加载更多' : '↑ Load more')}
+            </div>
+          ) : null}
           {messages
             .filter((message) => !(message.hiddenWhilePending && !message.text.trim()))
             .map((message) => (

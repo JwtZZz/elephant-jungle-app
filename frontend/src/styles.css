@@ -3680,6 +3680,16 @@ button, input { font: inherit; }
   position: relative;
 }
 
+.history-sentinel {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 0;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
 .mobile-chat-panel .chat-box {
   border-radius: 16px;
   padding: 30px 14px 14px;

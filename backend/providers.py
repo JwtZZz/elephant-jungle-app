@@ -357,7 +357,20 @@ def ocr_image_data_url(image_data_url: str, prompt: str | None = None) -> str:
     raise RuntimeError("OCR request failed.")
 
 
-def generate_answer(query: str, contexts: list[str], provider: str | None = None) -> str:
+def _append_memory(system_prompt: str, memory_summary: str | None) -> str:
+    """Append memory summary to system prompt if available."""
+    if not memory_summary:
+        return system_prompt
+    return f"{system_prompt}\n\n【对话记忆】\n{memory_summary}"
+
+
+def generate_answer(
+    query: str,
+    contexts: list[str],
+    provider: str | None = None,
+    history_messages: list[dict] | None = None,
+    memory_summary: str | None = None,
+) -> str:
     context_text = "\n\n".join([f"[{i + 1}] {c}" for i, c in enumerate(contexts)])
     system_prompt = (
         "You are a cryptocurrency and Web3 knowledge assistant. "
@@ -369,30 +382,30 @@ def generate_answer(query: str, contexts: list[str], provider: str | None = None
         "unless the user explicitly asks for structured formatting. "
         "Prefer short natural paragraphs that sound like a person explaining something clearly."
     )
+    messages: list[dict] = [{"role": "system", "content": _append_memory(system_prompt, memory_summary)}]
+    if history_messages:
+        messages.extend(history_messages)
     user_prompt = f"Reference material:\n{context_text}\n\nQuestion: {query}"
-    return _chat_completion(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        provider=provider,
-    )
+    messages.append({"role": "user", "content": user_prompt})
+    return _chat_completion(messages, provider=provider)
 
 
-def generate_general_answer(query: str, provider: str | None = None) -> str:
+def generate_general_answer(
+    query: str,
+    provider: str | None = None,
+    history_messages: list[dict] | None = None,
+    memory_summary: str | None = None,
+) -> str:
     system_prompt = (
         "You are a helpful assistant. Give clear, direct answers in natural Chinese unless the user asks otherwise. "
         "Do not use Markdown headings, bold markers, bullet lists, or numbered lists unless the user explicitly asks. "
         "Prefer a warm, conversational explanation that sounds human."
     )
-    return _chat_completion(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query},
-        ],
-        temperature=0.5,
-        provider=provider,
-    )
+    messages: list[dict] = [{"role": "system", "content": _append_memory(system_prompt, memory_summary)}]
+    if history_messages:
+        messages.extend(history_messages)
+    messages.append({"role": "user", "content": query})
+    return _chat_completion(messages, temperature=0.5, provider=provider)
 
 
 def translate_text(text: str, target_language: str = "zh") -> str:

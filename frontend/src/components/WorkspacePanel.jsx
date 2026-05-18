@@ -15,7 +15,7 @@ function EmptyView() {
 export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs, language, setLanguage }) {
   const workspaceSpriteTrackRef = useRef(null)
   const workspaceSpriteShellRef = useRef(null)
-  const [didVisitAgents, setDidVisitAgents] = useState(activeView === 'agents')
+  const [visitedViews, setVisitedViews] = useState(new Set([activeView]))
   const { spriteMode, pauseSprite, resumeSprite } = useSpriteOrbit([
     { trackRef: workspaceSpriteTrackRef, shellRef: workspaceSpriteShellRef, direction: -1 },
   ])
@@ -29,10 +29,17 @@ export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs
   }, [apiBase])
 
   useEffect(() => {
-    if (activeView === 'agents') {
-      setDidVisitAgents(true)
-    }
+    setVisitedViews((prev) => new Set([...prev, activeView]))
   }, [activeView])
+
+  function viewStyle(view) {
+    return {
+      display: activeView === view ? 'flex' : 'none',
+      flexDirection: 'column',
+      flex: 1,
+      minHeight: 0,
+    }
+  }
 
   return (
     <section className="workspace-panel">
@@ -45,15 +52,31 @@ export default function WorkspacePanel({ activeView, apiBase, marketRows, briefs
           <div className={`sprite-avatar ${spriteMode}`} />
         </div>
       </div>
-      {activeView === 'markets' ? <MarketsView apiBase={apiBase} marketRows={marketRows} briefs={briefs} language={language} /> : null}
-      {didVisitAgents ? (
-        <div style={{ display: activeView === 'agents' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {visitedViews.has('markets') ? (
+        <div style={viewStyle('markets')}>
+          <MarketsView apiBase={apiBase} marketRows={marketRows} briefs={briefs} language={language} />
+        </div>
+      ) : null}
+      {visitedViews.has('agents') ? (
+        <div style={viewStyle('agents')}>
           <AgentsView apiBase={apiBase} language={language} />
         </div>
       ) : null}
-      {activeView === 'research' ? <SettingsView language={language} setLanguage={setLanguage} /> : null}
-      {activeView === 'work' ? <WorkView apiBase={apiBase} language={language} /> : null}
-      {activeView === 'wallet' ? <WalletView apiBase={apiBase} language={language} /> : null}
+      {visitedViews.has('research') ? (
+        <div style={viewStyle('research')}>
+          <SettingsView language={language} setLanguage={setLanguage} />
+        </div>
+      ) : null}
+      {visitedViews.has('work') ? (
+        <div style={viewStyle('work')}>
+          <WorkView apiBase={apiBase} language={language} />
+        </div>
+      ) : null}
+      {visitedViews.has('wallet') ? (
+        <div style={viewStyle('wallet')}>
+          <WalletView apiBase={apiBase} language={language} />
+        </div>
+      ) : null}
       {!['markets', 'agents', 'research', 'work', 'wallet'].includes(activeView) ? <EmptyView /> : null}
     </section>
   )

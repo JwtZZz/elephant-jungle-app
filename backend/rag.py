@@ -420,9 +420,11 @@ def chat(
     top_k: int = DEFAULT_TOP_K,
     use_rag: bool = True,
     provider: str | None = None,
+    history_messages: list[dict] | None = None,
+    memory_summary: str | None = None,
 ) -> dict:
     if not use_rag:
-        answer = generate_general_answer(query=query, provider=provider)
+        answer = generate_general_answer(query=query, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
         return {"answer": answer, "contexts": [], "sources": [], "mode": "general"}
 
     lang = _detect_query_language(query)
@@ -431,12 +433,12 @@ def chat(
     sources = build_sources(hits)
 
     if top_score < FALLBACK_SCORE_THRESHOLD:
-        answer = generate_general_answer(query=query, provider=provider)
+        answer = generate_general_answer(query=query, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
         answer = f"{answer}\n\n命中分数：{top_score:.3f}"
         return {"answer": answer, "contexts": hits, "sources": sources, "mode": "general"}
 
     context_text = _build_context(hits)
-    answer = generate_answer(query=query, contexts=[context_text], provider=provider)
+    answer = generate_answer(query=query, contexts=[context_text], provider=provider, history_messages=history_messages, memory_summary=memory_summary)
     answer = f"{answer}\n\n命中分数：{top_score:.3f}"
     return {"answer": answer, "contexts": hits, "sources": sources, "mode": "rag"}
 
@@ -444,12 +446,17 @@ def chat(
 MAX_AGENT_TURNS = 6
 
 
-MAX_HISTORY_TURNS = 6
+MAX_HISTORY_TURNS = 12
 
 MEMORY_SUMMARIZER_PROMPT = (
     "你是一个记忆管理器。根据旧的记忆摘要和最新的对话，提炼更新后的记忆摘要。\n"
-    "摘要应包含用户的兴趣、偏好、关注的话题、问过的币种等关键信息。\n"
-    "只输出事实，不要评价。按条目组织，保持简洁，不超过200字。"
+    "请按以下结构组织，每条一句话：\n"
+    "- 用户信息：邮箱、时区偏好等\n"
+    "- 关注的币种：\n"
+    "- 已创建的任务：\n"
+    "- 近期兴趣话题：\n"
+    "- 其他偏好：\n"
+    "只输出事实，不要评价。不超过300字。"
 )
 
 
@@ -486,6 +493,7 @@ TOOL_NAMES_ZH = {
     "get_meme_trending": "查询Meme币",
     "get_whale_feed": "查询鲸鱼转账",
     "search_knowledge_base": "搜索知识库",
+    "create_work_task": "创建任务",
 }
 
 
@@ -496,6 +504,7 @@ def agent_chat(
     intent: str | None = None,
     on_event: callable = None,
     provider: str | None = None,
+    user: dict | None = None,
 ) -> dict:
     """Chat with tool-calling ability (market-data agent).
 
@@ -511,6 +520,8 @@ def agent_chat(
     _emit = lambda t, m: on_event(t, m) if on_event else None
 
     system_content = AGENT_SYSTEM_PROMPT
+    if user and user.get("email"):
+        system_content += f"\n\n当前登录用户邮箱：{user['email']}。create_work_task 的 recipient_email 参数如果用户没有明确指定其他邮箱，就使用这个邮箱。"
     if memory_summary:
         system_content += f"\n\n【对话记忆】\n{memory_summary}"
 
@@ -569,7 +580,7 @@ def agent_chat(
 
             zh_name = TOOL_NAMES_ZH.get(func_name, func_name)
             _emit("tool_call", f"正在{zh_name}...")
-            tool_result = execute_tool(func_name, func_args)
+            tool_result = execute_tool(func_name, func_args, user=user)
             _emit("tool_result", f"{zh_name}完成")
 
             messages.append({

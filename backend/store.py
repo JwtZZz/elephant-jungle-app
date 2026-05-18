@@ -169,6 +169,10 @@ def init_db() -> None:
             )
             """
         )
+        ensure_columns(conn, "work_tasks", {
+            "cron_expression": "TEXT DEFAULT ''",
+            "email_body_template": "TEXT DEFAULT ''",
+        })
 
 
 def insert_document(
@@ -446,19 +450,28 @@ def save_chat_message(user_id: int, user_content: str, bot_content: str) -> int:
         return int(cur.lastrowid)
 
 
-def get_chat_history(user_id: int, limit: int = 100) -> list[dict]:
+def get_chat_history(user_id: int, limit: int = 100, offset: int = 0) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT id, user_content, bot_content, created_at
             FROM chat_messages
             WHERE user_id = ?
-            ORDER BY id ASC
-            LIMIT ?
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
             """,
-            (user_id, limit),
+            (user_id, limit, offset),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [dict(row) for row in reversed(rows)]
+
+
+def get_chat_history_count(user_id: int) -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM chat_messages WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return row[0] if row else 0
 
 
 def _json_dumps(payload: dict) -> str:
@@ -560,6 +573,8 @@ def create_work_task(
     recipient_email: str,
     email_subject: str,
     email_template_payload: dict,
+    cron_expression: str = '',
+    email_body_template: str = '',
     next_check_at: int | None = None,
 ) -> dict:
     task_id = str(uuid.uuid4())
@@ -569,9 +584,9 @@ def create_work_task(
             INSERT INTO work_tasks(
                 id, user_id, user_email, workflow_type, title, status, asset_symbol, operator,
                 threshold_value, threshold_currency, recipient_email, email_subject,
-                email_template_payload, next_check_at
+                email_template_payload, next_check_at, cron_expression, email_body_template
             )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task_id,
@@ -588,6 +603,8 @@ def create_work_task(
                 email_subject,
                 _json_dumps(email_template_payload),
                 next_check_at,
+                cron_expression,
+                email_body_template,
             ),
         )
         row = conn.execute(

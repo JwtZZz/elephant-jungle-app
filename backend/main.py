@@ -25,6 +25,7 @@ from store import (
     find_user_by_email,
     find_user_by_id,
     get_chat_history,
+    get_chat_history_count,
     get_memory_summary,
     init_db,
     save_chat_message,
@@ -751,11 +752,16 @@ def auth_me(user: dict | None = Depends(get_current_user)) -> dict:
 
 
 @app.get("/chat/history")
-def chat_history(user: dict | None = Depends(get_current_user)) -> dict:
+def chat_history(
+    user: dict | None = Depends(get_current_user),
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> dict:
     if user is None:
-        return {"messages": []}
-    messages = get_chat_history(user["id"])
-    return {"messages": messages}
+        return {"messages": [], "total": 0}
+    messages = get_chat_history(user["id"], limit=limit, offset=offset)
+    total = get_chat_history_count(user["id"])
+    return {"messages": messages, "total": total}
 
 
 @app.post("/work/assistant/message")
@@ -904,6 +910,43 @@ def _load_memory(user: dict | None) -> str | None:
     return get_memory_summary(user["id"])
 
 
+def _is_task_request(query: str) -> bool:
+    """Detect if the user is asking to create a work task (alert / cron report)."""
+    q = query.strip()
+    if not q:
+        return False
+
+    # Explicit task creation keywords
+    if re.search(r'(创建|设置|添加|新建)\s*.{0,8}(任务|提醒|通知|预警)', q):
+        return True
+    if re.search(r'\b(set|create|add|schedule)\b.{0,20}\b(alert|reminder|report|notification|task)\b', q, re.I):
+        return True
+
+    # "发/给/送 ... 邮件/价格/报告" — send email / send price patterns
+    if re.search(r'[发给送].{0,30}(价格|报告|行情|多少钱|邮箱|邮件)', q):
+        return True
+
+    # Threshold breach: "跌破 60000", "涨破 10 万", "低于 3000"
+    if re.search(r'(跌破|涨破|低于|高于|超过|达到)\s*\d', q):
+        return True
+
+    # Time specification + price/market term (cron tasks)
+    has_time = bool(re.search(
+        r'(凌晨|早上|早晨|上午|下午|晚上|今晚|明天|每天|每日|每周|每\s*\d+\s*[小时分天周]|定时|定期)',
+        q,
+    ))
+    has_price = bool(re.search(r'(价格|行情|提醒|通知|报告|BTC|ETH|SOL|比特币|以太坊)', q, re.I))
+    if has_time and has_price:
+        return True
+
+    return False
+
+
+# Track active work session per user for multi-turn task creation.
+# Maps user_id → session_id. Cleared on task confirmation or error.
+_active_work_sessions: dict[int, str] = {}
+
+
 @app.post("/chat")
 def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) -> dict:
     try:
@@ -919,55 +962,104 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
         if req.auto_intent:
             intent = classify_intent(query)
 
+        # Task-creation intercept: route to work_service directly,
+        # bypassing the LLM agent. On follow-up messages the active
+        # session_id provides continuity so "btc" / "my@email.com"
+        # completes the authoring graph across multiple turns.
+        active_session_id = _active_work_sessions.get(user["id"]) if user else None
+        if user and (_is_task_request(query) or active_session_id):
+            task_memory_summary = _load_memory(user)
+            try:
+                lang = "zh" if re.search(r'[一-鿿]', query) else "en"
+                work_session = handle_work_assistant_message(
+                    user=user,
+                    message=query,
+                    session_id=active_session_id,
+                    language=lang,
+                )
+                new_session_id = work_session.get("session_id")
+                if new_session_id:
+                    _active_work_sessions[user["id"]] = new_session_id
+
+                if work_session.get("needs_confirmation"):
+                    task = confirm_work_task(user=user, session_id=new_session_id)
+                    _active_work_sessions.pop(user["id"], None)
+                    answer = f"✅ 任务已创建：{task.get('title', '')}"
+                    if task.get("cron_expression"):
+                        answer += f"（定时：{task['cron_expression']}）"
+                else:
+                    answer = work_session.get("assistant_message") or ""
+                result = {
+                    "answer": answer,
+                    "contexts": [],
+                    "sources": [],
+                    "mode": "work_task",
+                    "intent": intent,
+                }
+                if user:
+                    save_chat_message(user["id"], query, answer)
+                    new_summary = update_memory_summary(
+                        old_summary=(task_memory_summary or ""),
+                        query=query,
+                        answer=answer,
+                        provider=provider,
+                    )
+                    if new_summary:
+                        save_memory_summary(user["id"], new_summary)
+                return result
+            except Exception:
+                if user:
+                    _active_work_sessions.pop(user["id"], None)
+
+        # Always load conversation history for logged-in users
+        history_messages = _build_agent_history(user)
+        memory_summary = _load_memory(user)
+
         if intent == INTENT_GENERAL:
-            result = chat(query=query, use_rag=False, provider=provider)
+            result = chat(query=query, use_rag=False, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
         elif intent == INTENT_KNOWLEDGE:
-            result = chat(query=query, top_k=req.top_k, use_rag=True, provider=provider)
+            result = chat(query=query, top_k=req.top_k, use_rag=True, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
         elif intent == INTENT_MARKET:
-            history_messages = _build_agent_history(user)
-            memory_summary = _load_memory(user)
             result = agent_chat(
                 query=query,
                 history_messages=history_messages,
                 memory_summary=memory_summary,
                 intent=intent,
                 provider=provider,
+                user=user,
             )
         elif intent == INTENT_MIXED:
-            history_messages = _build_agent_history(user)
-            memory_summary = _load_memory(user)
             result = agent_chat(
                 query=query,
                 history_messages=history_messages,
                 memory_summary=memory_summary,
                 provider=provider,
+                user=user,
             )
         elif req.use_agent:
-            history_messages = _build_agent_history(user)
-            memory_summary = _load_memory(user)
             result = agent_chat(
                 query=query,
                 history_messages=history_messages,
                 memory_summary=memory_summary,
                 provider=provider,
+                user=user,
             )
         else:
-            result = chat(query=query, top_k=req.top_k, use_rag=req.use_rag, provider=provider)
+            result = chat(query=query, top_k=req.top_k, use_rag=req.use_rag, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
 
         if intent:
             result["intent"] = intent
 
         if user:
             save_chat_message(user["id"], query, result.get("answer", ""))
-            if intent in (INTENT_MARKET, INTENT_MIXED) or req.use_agent:
-                new_summary = update_memory_summary(
-                    old_summary=(_load_memory(user) or ""),
-                    query=query,
-                    answer=result.get("answer", ""),
-                    provider=provider,
-                )
-                if new_summary:
-                    save_memory_summary(user["id"], new_summary)
+            new_summary = update_memory_summary(
+                old_summary=(_load_memory(user) or ""),
+                query=query,
+                answer=result.get("answer", ""),
+                provider=provider,
+            )
+            if new_summary:
+                save_memory_summary(user["id"], new_summary)
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -999,16 +1091,55 @@ def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user))
                 # 本地模型跳过 RAG
                 use_rag = req.use_rag if provider != "ollama" else False
 
+                memory_summary = _load_memory(user)
+
                 intent = None
                 if req.auto_intent:
                     intent = classify_intent(query)
                     event_queue.put(("intent", {"intent": intent, "message": f"意图: {intent}"}))
 
+                # Task-creation keyword intercept (streaming variant)
+                active_session_id = _active_work_sessions.get(user["id"]) if user else None
+                if user and (_is_task_request(query) or active_session_id):
+                    task_memory_summary = _load_memory(user)
+                    try:
+                        lang = "zh" if re.search(r'[一-鿿]', query) else "en"
+                        work_session = handle_work_assistant_message(
+                            user=user, message=query, session_id=active_session_id, language=lang,
+                        )
+                        new_session_id = work_session.get("session_id")
+                        if new_session_id:
+                            _active_work_sessions[user["id"]] = new_session_id
+                        if work_session.get("needs_confirmation"):
+                            task = confirm_work_task(user=user, session_id=new_session_id)
+                            _active_work_sessions.pop(user["id"], None)
+                            answer = f"✅ 任务已创建：{task.get('title', '')}"
+                            if task.get("cron_expression"):
+                                answer += f"（定时：{task['cron_expression']}）"
+                        else:
+                            answer = work_session.get("assistant_message") or ""
+                        event_queue.put(("answer", {"text": answer}))
+                        if user:
+                            save_chat_message(user["id"], query, answer)
+                            new_summary = update_memory_summary(
+                                old_summary=(task_memory_summary or ""),
+                                query=query,
+                                answer=answer,
+                                provider=provider,
+                            )
+                            if new_summary:
+                                save_memory_summary(user["id"], new_summary)
+                        event_queue.put(("done", {}))
+                        return
+                    except Exception:
+                        if user:
+                            _active_work_sessions.pop(user["id"], None)
+
                 if intent == "general":
-                    result = chat(query=query, use_rag=False, provider=provider)
+                    result = chat(query=query, use_rag=False, provider=provider, history_messages=_build_agent_history(user), memory_summary=memory_summary)
                     event_queue.put(("answer", {"text": result["answer"]}))
                 elif intent == "knowledge":
-                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider)
+                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider, history_messages=_build_agent_history(user), memory_summary=memory_summary)
                     event_queue.put(("answer", {"text": result["answer"]}))
                 elif intent in ("market", "mixed") or req.use_agent:
                     history_messages = _build_agent_history(user)
@@ -1020,22 +1151,22 @@ def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user))
                         intent=intent,
                         on_event=on_event,
                         provider=provider,
+                        user=user,
                     )
                     event_queue.put(("answer", {"text": result["answer"]}))
                 else:
-                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider)
+                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider, history_messages=_build_agent_history(user), memory_summary=memory_summary)
                     event_queue.put(("answer", {"text": result["answer"]}))
 
                 if user:
                     save_chat_message(user["id"], query, result.get("answer", ""))
-                    if intent in ("market", "mixed") or req.use_agent:
-                        new_summary = update_memory_summary(
-                            old_summary=(_load_memory(user) or ""),
-                            query=query,
-                            answer=result.get("answer", ""),
-                            provider=provider,
-                        )
-                        if new_summary:
+                    new_summary = update_memory_summary(
+                        old_summary=(_load_memory(user) or ""),
+                        query=query,
+                        answer=result.get("answer", ""),
+                        provider=provider,
+                    )
+                    if new_summary:
                             save_memory_summary(user["id"], new_summary)
             except Exception as exc:
                 event_queue.put(("error", {"message": str(exc)}))
