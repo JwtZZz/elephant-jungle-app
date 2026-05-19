@@ -492,9 +492,13 @@ TOOL_NAMES_ZH = {
     "get_market_timeline": "查询新闻",
     "get_meme_trending": "查询Meme币",
     "get_whale_feed": "查询鲸鱼转账",
+    "get_news_headlines": "查询头条新闻",
+    "get_news_by_topic": "查询主题新闻",
     "search_knowledge_base": "搜索知识库",
     "create_work_task": "创建任务",
 }
+
+_TIME_SENSITIVE = re.compile(r"(最近|今天|昨日|昨天|本周|本月|近期|最新|刚刚|刚才|latest|breaking|just\s+in)", re.IGNORECASE)
 
 
 def agent_chat(
@@ -537,6 +541,29 @@ def agent_chat(
         except Exception:
             pass
 
+    # Pre-fetch coin-specific news for time-sensitive market queries.
+    # Detect coin name from query (e.g. 比特币->bitcoin, 以太坊->ethereum)
+    news_context: str | None = None
+    if intent == "market" and _TIME_SENSITIVE.search(query):
+        _emit("status", "正在获取最新新闻...")
+        try:
+            from news_aggregator import fetch_by_topic as _fetch_topic, _COIN_ALIASES
+            # Try to detect which coin the user is asking about
+            q = query.lower()
+            detected = None
+            for coin, aliases in _COIN_ALIASES.items():
+                if any(a in q for a in aliases):
+                    detected = coin
+                    break
+            topic = detected or q[:20]
+            news_items = _fetch_topic(topic, max_items=6)
+            if news_items:
+                lines = [f"[{item.get('source','')}] {item.get('title','')}" for item in news_items]
+                label = topic.upper() if detected else "加密货币"
+                news_context = f"最新{label}相关新闻（多源聚合）：\n" + "\n".join(lines)
+        except Exception:
+            pass
+
     messages: list[dict] = [
         {"role": "system", "content": system_content},
     ]
@@ -553,7 +580,10 @@ def agent_chat(
             ),
         })
     else:
-        messages.append({"role": "user", "content": query})
+        if news_context:
+            messages.append({"role": "user", "content": f"{news_context}\n\n记得同时调用 get_market_coins 获取最新价格数据来结合新闻回答。\n\n用户问题：{query}"})
+        else:
+            messages.append({"role": "user", "content": query})
 
     for turn in range(MAX_AGENT_TURNS):
         _emit("status", "正在思考下一步操作...")

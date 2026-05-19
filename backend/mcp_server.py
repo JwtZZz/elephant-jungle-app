@@ -11,6 +11,7 @@ Usage:
     python mcp_server.py           # SSE transport (web app)
 """
 
+import hashlib
 import json
 import os
 import re
@@ -25,6 +26,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 from cache_store import get_json as cache_get_json, set_json as cache_set_json
+from news_aggregator import fetch_headlines, fetch_by_topic
 from providers import translate_text
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -64,6 +66,10 @@ WHALE_FEED_TTL = 10
 WHALE_FEED_DEFAULT_LIMIT = 24
 WHALE_FEED_REDIS_KEY = "whales:feed:v1"
 _whale_cache: dict[str, dict] = {}
+
+# News headlines
+NEWS_TTL = 300  # 5 minutes
+_news_cache: dict[str, dict] = {}
 
 ARKHAM_API_KEY = os.getenv("ARKHAM_API_KEY", "").strip()
 ARKHAM_TRANSFERS_URL = os.getenv("ARKHAM_TRANSFERS_URL", "https://api.arkm.com/transfers").strip()
@@ -897,6 +903,68 @@ def _fetch_whale_feed(limit: int = WHALE_FEED_DEFAULT_LIMIT) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# News data functions — multi-source aggregator
+# ---------------------------------------------------------------------------
+
+
+def _format_news_items(items) -> str:
+    """Format news items as LLM-friendly text."""
+    if not items:
+        return "暂无相关新闻。"
+    lines = []
+    for i, item in enumerate(items, 1):
+        title = item.get("title", "")
+        source = item.get("source", "")
+        summary = item.get("summary", "")[:200]
+        link = item.get("link", "")
+        lines.append(f"{i}. [{source}] {title}")
+        if summary:
+            lines.append(f"   {summary}")
+        if link:
+            lines.append(f"   {link}")
+    return "\n".join(lines)
+
+
+def _fetch_news_headlines(max_items: int = 30) -> list[dict]:
+    """Top headlines from multi-source aggregator, Redis-cached."""
+    normalized_limit = max(5, min(int(max_items), 50))
+    cache_key = "news:headlines:v1"
+    now = time.time()
+
+    redis_cached = cache_get_json(cache_key)
+    if isinstance(redis_cached, list) and redis_cached:
+        return list(redis_cached)
+    cached = _news_cache.get(cache_key)
+    if cached and (now - cached.get("ts", 0.0)) < NEWS_TTL:
+        return list(cached.get("items", []))
+
+    items = fetch_headlines(normalized_limit)
+    _news_cache[cache_key] = {"ts": now, "items": items}
+    cache_set_json(cache_key, items, NEWS_TTL)
+    return items
+
+
+def _fetch_news_by_topic(topic: str, max_items: int = 20) -> list[dict]:
+    """Topic-filtered news from multi-source aggregator, Redis-cached."""
+    normalized_limit = max(5, min(int(max_items), 30))
+    topic_key = hashlib.md5((topic or "").strip().lower().encode()).hexdigest()
+    cache_key = f"news:topic:{topic_key}:v1"
+    now = time.time()
+
+    redis_cached = cache_get_json(cache_key)
+    if isinstance(redis_cached, list) and redis_cached:
+        return list(redis_cached)
+    cached = _news_cache.get(cache_key)
+    if cached and (now - cached.get("ts", 0.0)) < NEWS_TTL:
+        return list(cached.get("items", []))
+
+    items = fetch_by_topic(topic, normalized_limit)
+    _news_cache[cache_key] = {"ts": now, "items": items}
+    cache_set_json(cache_key, items, NEWS_TTL)
+    return items
+
+
+# ---------------------------------------------------------------------------
 # search_knowledge_base — HTTP callback to main.py (needs ChromaDB)
 # ---------------------------------------------------------------------------
 
@@ -968,6 +1036,22 @@ def mcp_get_market_timeline(symbol: str, name: str = "", language: str = "zh") -
 )
 def mcp_get_whale_feed(limit: int = 24) -> list[dict]:
     return _fetch_whale_feed(limit=limit)
+
+
+@mcp.tool(
+    name="get_news_headlines",
+    description="获取最新的加密货币新闻头条（多源聚合，含 Reddit 热门讨论），无需参数。"
+)
+def mcp_get_news_headlines(max_items: int = 30) -> list[dict]:
+    return _fetch_news_headlines(max_items=max_items)
+
+
+@mcp.tool(
+    name="get_news_by_topic",
+    description="按主题搜索最新的加密货币新闻，传入主题词如 bitcoin、ethereum、defi、比特币等。"
+)
+def mcp_get_news_by_topic(topic: str, max_items: int = 20) -> list[dict]:
+    return _fetch_news_by_topic(topic=topic, max_items=max_items)
 
 
 # ---------------------------------------------------------------------------

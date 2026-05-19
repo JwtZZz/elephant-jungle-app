@@ -15,6 +15,7 @@ from mcp_server import (
     _coerce_float,
     _short_wallet,
     _minutes_ago,
+    _format_news_items,
 )
 
 
@@ -92,3 +93,31 @@ class TestRSSParsing:
 
     def test_parse_rss_items_missing_channel(self):
         assert parse_rss_items("<root><not-channel/></root>") == []
+
+
+class TestNewsFormatter:
+    def test_format_news_items_empty(self):
+        assert _format_news_items([]) == "暂无相关新闻。"
+
+    def test_format_news_items_single(self):
+        items = [{"title": "Bitcoin Rally", "source": "CoinDesk", "summary": "BTC up 10%", "link": "https://example.com"}]
+        result = _format_news_items(items)
+        assert "[CoinDesk]" in result
+        assert "Bitcoin Rally" in result
+        assert "BTC up 10%" in result
+
+    def test_format_news_items_multiple(self):
+        items = [
+            {"title": "News 1", "source": "A", "summary": "", "link": ""},
+            {"title": "News 2", "source": "B", "summary": "Detail 2", "link": "https://b.com"},
+        ]
+        result = _format_news_items(items)
+        assert "1." in result
+        assert "2." in result
+        assert "News 1" in result
+        assert "News 2" in result
+
+    def test_format_news_items_no_summary(self):
+        items = [{"title": "Title Only", "source": "Src", "summary": "", "link": ""}]
+        result = _format_news_items(items)
+        assert "[Src]" in result
