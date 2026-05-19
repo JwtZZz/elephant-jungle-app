@@ -3,7 +3,7 @@
 > **AI-powered crypto intelligence platform with MCP-based real-time data and RAG knowledge base.**
 > AI 驱动的加密货币智能平台 — MCP 实时数据 + RAG 知识库动静结合架构。
 
-![Elephant Jungle workflow demo](assets/bsdiasdi.png)
+![Elephant Jungle workflow demo](assets/bsdiasdi.jpg)
 
 ---
 
