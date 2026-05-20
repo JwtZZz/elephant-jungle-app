@@ -764,6 +764,10 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+    if (authToken) {
+      window.localStorage.removeItem(GUEST_MESSAGES_STORAGE_KEY)
+      return
+    }
     const persistableMessages = messages.filter((message) => {
       if (!message || typeof message !== 'object') return false
       if (message.thinking || message.hiddenWhilePending) return false
@@ -774,7 +778,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       return
     }
     window.localStorage.setItem(GUEST_MESSAGES_STORAGE_KEY, JSON.stringify(persistableMessages))
-  }, [messages])
+  }, [authToken, messages])
 
   const loadChatHistory = useCallback(async () => {
     const token = window.localStorage.getItem('elephant_auth_token')
@@ -920,6 +924,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       if (typeof window !== 'undefined') {
         window.localStorage.setItem('elephant_auth_token', data.token)
         window.localStorage.setItem('elephant_user_email', data.user.email)
+        window.localStorage.removeItem(GUEST_MESSAGES_STORAGE_KEY)
       }
       setHistoryLoaded(false)
       setAccountSheetOpen(false)
