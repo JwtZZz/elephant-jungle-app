@@ -9,12 +9,30 @@ const SPRITE_BRIEF_REFRESH_MS = 15 * 60 * 1000
 const SPRITE_BUBBLE_TYPE_MS = 18
 const SPRITE_BUBBLE_HOLD_MS = 1500
 const MOBILE_KEYBOARD_CLOSE_DELTA = 96
+const GUEST_MESSAGES_STORAGE_KEY = 'elephant_guest_messages_v1'
 
 function shortEmail(email) {
   const atIndex = email.indexOf('@')
   if (atIndex <= 0) return email
   const prefix = email.slice(0, Math.min(atIndex, 3))
   return `${prefix}...`
+}
+
+function loadStoredGuestMessages() {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(GUEST_MESSAGES_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item) => item && typeof item === 'object')
+  } catch {
+    return []
+  }
+}
+
+function hasGuestConversation(messages) {
+  return (messages || []).some((message) => message?.role === 'user' && String(message?.text || '').trim())
 }
 
 function cleanHeadlineTitle(title = '') {
@@ -226,6 +244,7 @@ async function readJsonResponse(response, fallbackMessage) {
 export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly = false }) {
   const copy = COPY[language] || COPY.en
   const { theme, setTheme } = useTheme()
+  const [messages, setMessages] = useState(() => loadStoredGuestMessages())
   const [authToken, setAuthToken] = useState(() => {
     if (typeof window === 'undefined') return ''
     return window.localStorage.getItem('elephant_auth_token') || ''
@@ -244,8 +263,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const [historyOffset, setHistoryOffset] = useState(0)
   const [hasMoreHistory, setHasMoreHistory] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [guestChatUsed, setGuestChatUsed] = useState(false)
-  const [messages, setMessages] = useState([])
+  const [guestChatUsed, setGuestChatUsed] = useState(() => hasGuestConversation(loadStoredGuestMessages()))
   const [inputValue, setInputValue] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [ocrState, setOcrState] = useState(null)
@@ -263,7 +281,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const chatSpriteShellRef = useRef(null)
   const inputSpriteTrackRef = useRef(null)
   const inputSpriteShellRef = useRef(null)
-  const welcomeStartedRef = useRef(false)
+  const welcomeStartedRef = useRef(messages.length > 0)
   const activeRequestRef = useRef(null)
   const activeRunIdRef = useRef(0)
   const activeBotIdRef = useRef(null)
@@ -744,6 +762,20 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     checkAuth()
   }, [checkAuth])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const persistableMessages = messages.filter((message) => {
+      if (!message || typeof message !== 'object') return false
+      if (message.thinking || message.hiddenWhilePending) return false
+      return Boolean(String(message.text || '').trim() || String(message.imageUrl || '').trim())
+    })
+    if (!persistableMessages.length) {
+      window.localStorage.removeItem(GUEST_MESSAGES_STORAGE_KEY)
+      return
+    }
+    window.localStorage.setItem(GUEST_MESSAGES_STORAGE_KEY, JSON.stringify(persistableMessages))
+  }, [messages])
+
   const loadChatHistory = useCallback(async () => {
     const token = window.localStorage.getItem('elephant_auth_token')
     const headers = token ? { Authorization: `Bearer ${token}` } : {}
@@ -909,6 +941,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem('elephant_auth_token')
       window.localStorage.removeItem('elephant_user_email')
+      window.localStorage.removeItem(GUEST_MESSAGES_STORAGE_KEY)
     }
     setAccountSheetOpen(false)
     resetAuthForm()

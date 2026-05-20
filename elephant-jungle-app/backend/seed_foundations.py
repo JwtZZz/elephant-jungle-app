@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 from providers import validate_provider_env
 from rag import ingest_document
-from store import clean_duplicates_and_test_data, get_conn, init_db, sync_chroma_index
+from store import get_chroma_collection, get_conn, init_db, sync_chroma_index
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -76,18 +76,29 @@ def main() -> None:
     validate_provider_env()
     init_db()
 
-    # Clean up old data first
-    print("Cleaning duplicates and test data...")
-    cleaned = clean_duplicates_and_test_data()
-    print(f"  removed: {cleaned}")
-
-    # Remove old seed documents so re-ingestion picks up expanded versions
     with get_conn() as conn:
+        seed_doc_ids = [
+            row[0]
+            for row in conn.execute(
+                "SELECT id FROM documents WHERE source = 'Elephant Jungle Seed'"
+            ).fetchall()
+        ]
+        if seed_doc_ids:
+            placeholders = ",".join("?" for _ in seed_doc_ids)
+            conn.execute(
+                f"DELETE FROM chunks WHERE document_id IN ({placeholders})",
+                seed_doc_ids,
+            )
         removed = conn.execute(
             "DELETE FROM documents WHERE source = 'Elephant Jungle Seed'"
         ).rowcount
         conn.commit()
     print(f"  old seed documents removed: {removed}")
+
+    try:
+        get_chroma_collection().delete(where={"source": "Elephant Jungle Seed"})
+    except Exception:
+        pass
 
     md_files = sorted(KNOWLEDGE_DIR.glob("*.md"))
     if not md_files:
