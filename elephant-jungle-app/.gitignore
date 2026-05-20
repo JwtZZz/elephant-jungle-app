@@ -1,0 +1,29 @@
+# Environment
+.env
+*.env
+!.env.example
+
+# Python
+.venv/
+backend/venv/
+node_modules/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Database & Vector Store
+backend/rag.db
+backend/chroma/
+backend/briefs_cache.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & PIDs
+*.log
+*.pid
+
+# Misc
+backend/remote-env.txt
+LOCAL_MODEL_GUIDE.md

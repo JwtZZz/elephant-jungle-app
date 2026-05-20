@@ -1,0 +1,743 @@
+import json
+import sqlite3
+from pathlib import Path
+from typing import Iterable
+import uuid
+
+import chromadb
+
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "rag.db"
+CHROMA_DIR = BASE_DIR / "chroma"
+CHROMA_COLLECTION = "rag_chunks"
+DOCUMENT_COLUMNS = {
+    "title": "TEXT",
+    "url": "TEXT",
+    "published_at": "TEXT",
+    "doc_type": "TEXT",
+    "project": "TEXT",
+    "category": "TEXT",
+    "region": "TEXT",
+    "source_type": "TEXT",
+    "language": "TEXT",
+    "summary": "TEXT",
+}
+CHUNK_COLUMNS = {
+    "chunk_index": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
+def get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def get_chroma_collection():
+    client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+    return client.get_or_create_collection(
+        name=CHROMA_COLLECTION,
+        metadata={"hnsw:space": "cosine"},
+    )
+
+
+def ensure_columns(conn: sqlite3.Connection, table_name: str, columns: dict[str, str]) -> None:
+    existing = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    for column_name, column_type in columns.items():
+        if column_name not in existing:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def init_db() -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                title TEXT,
+                url TEXT,
+                published_at TEXT,
+                doc_type TEXT,
+                project TEXT,
+                category TEXT,
+                region TEXT,
+                source_type TEXT,
+                language TEXT,
+                summary TEXT,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL DEFAULT 0,
+                content TEXT NOT NULL,
+                embedding_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(document_id) REFERENCES documents(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                user_content TEXT NOT NULL,
+                bot_content TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        # Migration: drop old schema if it had 'role' column (old format)
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(chat_messages)").fetchall()}
+        if "role" in existing_cols:
+            conn.execute("DROP TABLE chat_messages")
+            conn.execute(
+                """
+                CREATE TABLE chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    user_content TEXT NOT NULL,
+                    bot_content TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                )
+                """
+            )
+        ensure_columns(conn, "documents", DOCUMENT_COLUMNS)
+        ensure_columns(conn, "chunks", CHUNK_COLUMNS)
+        ensure_columns(conn, "users", {"memory_summary": "TEXT DEFAULT ''"})
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS work_sessions (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                workflow_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS work_tasks (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                user_email TEXT NOT NULL,
+                workflow_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL,
+                asset_symbol TEXT NOT NULL,
+                operator TEXT NOT NULL,
+                threshold_value REAL NOT NULL,
+                threshold_currency TEXT NOT NULL,
+                recipient_email TEXT NOT NULL,
+                email_subject TEXT NOT NULL,
+                email_template_payload TEXT NOT NULL DEFAULT '{}',
+                last_checked_at TEXT,
+                last_price REAL,
+                last_triggered_at TEXT,
+                last_error TEXT,
+                next_check_at INTEGER,
+                locked_until INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+            """
+        )
+        ensure_columns(conn, "work_tasks", {
+            "cron_expression": "TEXT DEFAULT ''",
+            "email_body_template": "TEXT DEFAULT ''",
+        })
+
+
+def insert_document(
+    source: str,
+    content: str,
+    *,
+    title: str | None = None,
+    url: str | None = None,
+    published_at: str | None = None,
+    doc_type: str | None = None,
+    project: str | None = None,
+    category: str | None = None,
+    region: str | None = None,
+    source_type: str | None = None,
+    language: str | None = None,
+    summary: str | None = None,
+) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO documents(
+                source, title, url, published_at, doc_type, project, category,
+                region, source_type, language, summary, content
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source,
+                title,
+                url,
+                published_at,
+                doc_type,
+                project,
+                category,
+                region,
+                source_type,
+                language,
+                summary,
+                content,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def get_document(document_id: int) -> dict:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, source, title, url, published_at, doc_type, project, category,
+                   region, source_type, language, summary, content, created_at
+            FROM documents
+            WHERE id = ?
+            """,
+            (document_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"document {document_id} not found")
+    return dict(row)
+
+
+def build_chunk_metadata(document: dict, chunk_index: int, heading_path: str = "", chunk_type: str = "paragraph") -> dict:
+    metadata = {
+        "document_id": int(document["id"]),
+        "chunk_index": int(chunk_index),
+        "source": document.get("source") or "",
+        "title": document.get("title") or "",
+        "url": document.get("url") or "",
+        "published_at": document.get("published_at") or "",
+        "doc_type": document.get("doc_type") or "",
+        "project": document.get("project") or "",
+        "category": document.get("category") or "",
+        "region": document.get("region") or "",
+        "source_type": document.get("source_type") or "",
+        "language": document.get("language") or "",
+        "heading_path": heading_path or "",
+        "chunk_type": chunk_type or "paragraph",
+    }
+    return metadata
+
+
+def insert_chunks(
+    document_id: int,
+    chunks: Iterable[str],
+    embeddings: Iterable[list[float]],
+    heading_paths: Iterable[str] | None = None,
+    chunk_types: Iterable[str] | None = None,
+) -> int:
+    chunk_list = list(chunks)
+    embedding_list = list(embeddings)
+    heading_path_list = list(heading_paths) if heading_paths else [""] * len(chunk_list)
+    chunk_type_list = list(chunk_types) if chunk_types else ["paragraph"] * len(chunk_list)
+    document = get_document(document_id)
+    payload = [
+        (document_id, index, chunk, json.dumps(embedding, ensure_ascii=False))
+        for index, (chunk, embedding) in enumerate(zip(chunk_list, embedding_list))
+    ]
+    with get_conn() as conn:
+        before_id = conn.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM chunks").fetchone()["max_id"]
+        conn.executemany(
+            "INSERT INTO chunks(document_id, chunk_index, content, embedding_json) VALUES(?, ?, ?, ?)",
+            payload,
+        )
+    chunk_ids = [str(before_id + index + 1) for index in range(len(payload))]
+    chunk_metadatas = [
+        build_chunk_metadata(document, index, heading_path_list[index], chunk_type_list[index])
+        for index in range(len(chunk_list))
+    ]
+    collection = get_chroma_collection()
+    collection.upsert(
+        ids=chunk_ids,
+        documents=chunk_list,
+        embeddings=embedding_list,
+        metadatas=chunk_metadatas,
+    )
+    return len(payload)
+
+
+def load_all_chunks() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.id,
+                   c.document_id,
+                   c.chunk_index,
+                   c.content,
+                   c.embedding_json,
+                   d.source,
+                   d.title,
+                   d.url,
+                   d.published_at,
+                   d.doc_type,
+                   d.project,
+                   d.category,
+                   d.region,
+                   d.source_type,
+                   d.language
+            FROM chunks c
+            JOIN documents d ON d.id = c.document_id
+            ORDER BY c.id ASC
+            """
+        ).fetchall()
+    return [
+        {
+            "id": int(row["id"]),
+            "document_id": int(row["document_id"]),
+            "chunk_index": int(row["chunk_index"]),
+            "content": row["content"],
+            "embedding": json.loads(row["embedding_json"]),
+            "metadata": {
+                "document_id": int(row["document_id"]),
+                "chunk_index": int(row["chunk_index"]),
+                "source": row["source"] or "",
+                "title": row["title"] or "",
+                "url": row["url"] or "",
+                "published_at": row["published_at"] or "",
+                "doc_type": row["doc_type"] or "",
+                "project": row["project"] or "",
+                "category": row["category"] or "",
+                "region": row["region"] or "",
+                "source_type": row["source_type"] or "",
+                "language": row["language"] or "",
+            },
+        }
+        for row in rows
+    ]
+
+
+def sync_chroma_index() -> int:
+    chunks = load_all_chunks()
+    if not chunks:
+        return 0
+
+    collection = get_chroma_collection()
+    collection.upsert(
+        ids=[str(chunk["id"]) for chunk in chunks],
+        documents=[chunk["content"] for chunk in chunks],
+        embeddings=[chunk["embedding"] for chunk in chunks],
+        metadatas=[chunk["metadata"] for chunk in chunks],
+    )
+    return len(chunks)
+
+
+def search_chunks(query_embedding: list[float], top_k: int) -> list[dict]:
+    collection = get_chroma_collection()
+    result = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=max(1, top_k),
+    )
+
+    ids = result.get("ids", [[]])[0]
+    documents = result.get("documents", [[]])[0]
+    distances = result.get("distances", [[]])[0]
+    metadatas = result.get("metadatas", [[]])[0]
+
+    hits = []
+    for chunk_id, content, distance, metadata in zip(ids, documents, distances, metadatas):
+        distance_value = float(distance) if distance is not None else 1.0
+        score = max(0.0, 1.0 - distance_value)
+        safe_metadata = metadata or {}
+        hits.append(
+            {
+                "chunk_id": int(chunk_id),
+                "document_id": int(safe_metadata.get("document_id", 0)),
+                "chunk_index": int(safe_metadata.get("chunk_index", 0)),
+                "content": content,
+                "score": score,
+                "distance": distance_value,
+                "source": safe_metadata.get("source", ""),
+                "title": safe_metadata.get("title", ""),
+                "url": safe_metadata.get("url", ""),
+                "published_at": safe_metadata.get("published_at", ""),
+                "doc_type": safe_metadata.get("doc_type", ""),
+                "project": safe_metadata.get("project", ""),
+                "category": safe_metadata.get("category", ""),
+                "region": safe_metadata.get("region", ""),
+                "source_type": safe_metadata.get("source_type", ""),
+                "language": safe_metadata.get("language", ""),
+            }
+        )
+    return hits
+
+
+# --- Auth / user functions ---
+
+def find_user_by_email(email: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, email, created_at FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def find_user_by_id(user_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, email, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def create_user(email: str) -> dict:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO users(email) VALUES(?)",
+            (email,),
+        )
+        return {"id": int(cur.lastrowid), "email": email}
+
+
+def get_memory_summary(user_id: int) -> str:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT memory_summary FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    return (row["memory_summary"] or "") if row else ""
+
+
+def save_memory_summary(user_id: int, summary: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET memory_summary = ? WHERE id = ?",
+            (summary, user_id),
+        )
+
+
+def save_chat_message(user_id: int, user_content: str, bot_content: str) -> int:
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO chat_messages(user_id, user_content, bot_content) VALUES(?, ?, ?)",
+            (user_id, user_content, bot_content),
+        )
+        return int(cur.lastrowid)
+
+
+def get_chat_history(user_id: int, limit: int = 100, offset: int = 0) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_content, bot_content, created_at
+            FROM chat_messages
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (user_id, limit, offset),
+        ).fetchall()
+    return [dict(row) for row in reversed(rows)]
+
+
+def get_chat_history_count(user_id: int) -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM chat_messages WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return row[0] if row else 0
+
+
+def _json_dumps(payload: dict) -> str:
+    return json.dumps(payload or {}, ensure_ascii=False)
+
+
+def _json_loads(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _hydrate_work_session(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["state"] = _json_loads(data.pop("state_json", ""))
+    return data
+
+
+def _hydrate_work_task(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["email_template_payload"] = _json_loads(data.get("email_template_payload"))
+    return data
+
+
+def create_work_session(user_id: int, workflow_type: str, status: str, state: dict) -> dict:
+    session_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO work_sessions(id, user_id, workflow_type, status, state_json)
+            VALUES(?, ?, ?, ?, ?)
+            """,
+            (session_id, user_id, workflow_type, status, _json_dumps(state)),
+        )
+        row = conn.execute(
+            """
+            SELECT id, user_id, workflow_type, status, state_json, created_at, updated_at
+            FROM work_sessions
+            WHERE id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+    return _hydrate_work_session(row)
+
+
+def get_work_session(session_id: str, user_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, user_id, workflow_type, status, state_json, created_at, updated_at
+            FROM work_sessions
+            WHERE id = ? AND user_id = ?
+            """,
+            (session_id, user_id),
+        ).fetchone()
+    return _hydrate_work_session(row)
+
+
+def update_work_session(session_id: str, user_id: int, *, status: str, state: dict) -> dict | None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE work_sessions
+            SET status = ?, state_json = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ?
+            """,
+            (status, _json_dumps(state), session_id, user_id),
+        )
+        row = conn.execute(
+            """
+            SELECT id, user_id, workflow_type, status, state_json, created_at, updated_at
+            FROM work_sessions
+            WHERE id = ? AND user_id = ?
+            """,
+            (session_id, user_id),
+        ).fetchone()
+    return _hydrate_work_session(row)
+
+
+def create_work_task(
+    *,
+    user_id: int,
+    user_email: str,
+    workflow_type: str,
+    title: str,
+    status: str,
+    asset_symbol: str,
+    operator: str,
+    threshold_value: float,
+    threshold_currency: str,
+    recipient_email: str,
+    email_subject: str,
+    email_template_payload: dict,
+    cron_expression: str = '',
+    email_body_template: str = '',
+    next_check_at: int | None = None,
+) -> dict:
+    task_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO work_tasks(
+                id, user_id, user_email, workflow_type, title, status, asset_symbol, operator,
+                threshold_value, threshold_currency, recipient_email, email_subject,
+                email_template_payload, next_check_at, cron_expression, email_body_template
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                user_id,
+                user_email,
+                workflow_type,
+                title,
+                status,
+                asset_symbol,
+                operator,
+                threshold_value,
+                threshold_currency,
+                recipient_email,
+                email_subject,
+                _json_dumps(email_template_payload),
+                next_check_at,
+                cron_expression,
+                email_body_template,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM work_tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+    return _hydrate_work_task(row)
+
+
+def get_work_task(task_id: str, user_id: int) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM work_tasks WHERE id = ? AND user_id = ?",
+            (task_id, user_id),
+        ).fetchone()
+    return _hydrate_work_task(row)
+
+
+def get_work_task_by_id(task_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM work_tasks WHERE id = ?", (task_id,)).fetchone()
+    return _hydrate_work_task(row)
+
+
+def list_work_tasks(user_id: int, include_completed: bool = False) -> list[dict]:
+    statuses = ("active", "failed", "waiting_for_input", "waiting_for_confirmation")
+    query = "SELECT * FROM work_tasks WHERE user_id = ?"
+    params: list = [user_id]
+    if not include_completed:
+        query += f" AND status IN ({','.join('?' for _ in statuses)})"
+        params.extend(statuses)
+    query += " ORDER BY updated_at DESC, created_at DESC"
+    with get_conn() as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+    return [_hydrate_work_task(row) for row in rows]
+
+
+def cancel_work_task(task_id: str, user_id: int) -> dict | None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE work_tasks
+            SET status = 'canceled', locked_until = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ? AND status != 'completed'
+            """,
+            (task_id, user_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM work_tasks WHERE id = ? AND user_id = ?",
+            (task_id, user_id),
+        ).fetchone()
+    return _hydrate_work_task(row)
+
+
+def claim_due_work_tasks(now_ts: int, *, limit: int = 16, lock_seconds: int = 90) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id
+            FROM work_tasks
+            WHERE status = 'active'
+              AND (next_check_at IS NULL OR next_check_at <= ?)
+              AND (locked_until IS NULL OR locked_until < ?)
+            ORDER BY COALESCE(next_check_at, 0) ASC, created_at ASC
+            LIMIT ?
+            """,
+            (now_ts, now_ts, limit),
+        ).fetchall()
+        task_ids = [row["id"] for row in rows]
+        claimed: list[str] = []
+        for task_id in task_ids:
+            cursor = conn.execute(
+                """
+                UPDATE work_tasks
+                SET locked_until = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND status = 'active'
+                  AND (locked_until IS NULL OR locked_until < ?)
+                """,
+                (now_ts + lock_seconds, task_id, now_ts),
+            )
+            if cursor.rowcount:
+                claimed.append(task_id)
+        if not claimed:
+            return []
+        placeholders = ",".join("?" for _ in claimed)
+        claimed_rows = conn.execute(
+            f"SELECT * FROM work_tasks WHERE id IN ({placeholders})",
+            tuple(claimed),
+        ).fetchall()
+    return [_hydrate_work_task(row) for row in claimed_rows]
+
+
+def update_work_task_runtime(
+    task_id: str,
+    *,
+    status: str | None = None,
+    last_checked_at: str | None = None,
+    last_price: float | None = None,
+    last_triggered_at: str | None = None,
+    last_error: str | None = None,
+    next_check_at: int | None = None,
+    locked_until: int | None = None,
+) -> dict | None:
+    assignments = []
+    params: list = []
+    for key, value in (
+        ("status", status),
+        ("last_checked_at", last_checked_at),
+        ("last_price", last_price),
+        ("last_triggered_at", last_triggered_at),
+        ("last_error", last_error),
+        ("next_check_at", next_check_at),
+        ("locked_until", locked_until),
+    ):
+        if value is not None:
+            assignments.append(f"{key} = ?")
+            params.append(value)
+    assignments.append("updated_at = CURRENT_TIMESTAMP")
+    params.append(task_id)
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE work_tasks SET {', '.join(assignments)} WHERE id = ?",
+            tuple(params),
+        )
+        row = conn.execute("SELECT * FROM work_tasks WHERE id = ?", (task_id,)).fetchone()
+    return _hydrate_work_task(row)
+
+
+def clear_work_task_lock(task_id: str, *, last_error: str | None = None, next_check_at: int | None = None) -> dict | None:
+    return update_work_task_runtime(
+        task_id,
+        last_error=last_error,
+        next_check_at=next_check_at,
+        locked_until=0,
+    )

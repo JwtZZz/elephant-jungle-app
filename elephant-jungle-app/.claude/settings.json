@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://127.0.0.1:5500/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5500/assets/index-BIcZktP1.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5500/assets/index-CS5tO2qX.css)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{url_effective}\" -L \"https://cdn.dexscreener.com/token-images/icon/solana/DauQPNZyWTDi7Bh3u9vc66Dn7ygbDDBky1Kq2HFCpump\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} → %{url_effective}\\\\n\" -L -H \"User-Agent: Mozilla/5.0\" -H \"Referer: https://dexscreener.com/\" -H \"Origin: https://dexscreener.com\" \"https://dd.dexscreener.com/ds-data/tokens/solana/DauQPNZyWTDi7Bh3u9vc66Dn7ygbDDBky1Kq2HFCpump.png?size=sm\")",
+      "Bash(curl -s http://127.0.0.1:5500/assets/index-P1cRXcIP.css)",
+      "Bash(curl -s -N -X POST http://127.0.0.1:8000/chat/stream -H 'Content-Type: application/json' -d '{\"query\":\"你好\",\"top_k\":3,\"use_rag\":false}')",
+      "Bash(xxd)",
+      "Bash(sqlite3 /root/elephant-jungle-app/backend/rag.db ' *)",
+      "Bash(python3 seed_foundations.py)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(kill 344162)",
+      "Bash(nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000)",
+      "Read(//tmp/**)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(pkill -f \"uvicorn main:app\")",
+      "Bash(kill 468342)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
+  }
+}
