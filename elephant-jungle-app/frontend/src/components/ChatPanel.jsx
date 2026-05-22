@@ -96,6 +96,7 @@ const COPY = {
     timeout: 'Request timed out, please retry.',
     backendError: 'Backend error',
     imageOcr: 'Image OCR',
+    imagePasted: 'Pasted image',
     imageAttached: 'Ready to send',
     ocrReading: 'Reading image...',
     ocrReady: 'OCR ready',
@@ -130,6 +131,7 @@ const COPY = {
     timeout: '请求超时，请重试。',
     backendError: '后端错误',
     imageOcr: '图片识别',
+    imagePasted: '粘贴的图片',
     imageAttached: '待发送',
     ocrReading: '正在识别图片...',
     ocrReady: '识别完成',
@@ -289,6 +291,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const workSessionRef = useRef('')
   const workDraftRef = useRef(null)
   const textInputRef = useRef(null)
+  const inputShellRef = useRef(null)
   const topbarRef = useRef(null)
 
   const { spriteMode, boost, cruise, pauseSprite, resumeSprite } = useSpriteOrbit(
@@ -992,6 +995,60 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     })
   }, [copy.welcome])
 
+  // Native paste listener for images
+  useEffect(() => {
+    const handlePaste = (event) => {
+      alert('PASTE DETECTED! items=' + (event.clipboardData?.items?.length || 0))
+      // Show visual feedback that paste was detected
+      setOcrState({ name: 'paste fired: ' + (event.clipboardData?.items?.length || 0) + ' items', status: 'loading' })
+
+      const items = event.clipboardData?.items
+      let imageFile = null
+
+      // Try to find image from clipboard items
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i]
+          if (item.type.startsWith('image/')) {
+            event.preventDefault()
+            const file = item.getAsFile()
+            if (file) {
+              imageFile = new File([file], `pasted-image-${Date.now()}.png`, { type: file.type })
+            }
+            break
+          }
+        }
+      }
+
+      if (!imageFile) {
+        setTimeout(() => setOcrState(null), 3000)
+        return
+      }
+      setSelectedImageFile(imageFile)
+      readFileAsDataUrl(imageFile)
+        .then((dataUrl) => {
+          setSelectedImagePreview(dataUrl)
+          setOcrState({ name: copy.imagePasted, status: 'attached' })
+        })
+        .catch((error) => {
+          console.error('Paste preview failed', error)
+          setSelectedImageFile(null)
+          setSelectedImagePreview('')
+          setOcrState(null)
+        })
+    }
+
+    // Listen at document level capture phase - most reliable way to catch paste
+    document.addEventListener('paste', handlePaste, true)
+    // Direct assignment as ultimate fallback
+    document.onpaste = handlePaste
+
+    return () => {
+      document.removeEventListener('paste', handlePaste, true)
+      document.onpaste = null
+    }
+  }, [copy.imagePasted])
+
   const interruptActiveReply = () => {
     activeRunIdRef.current += 1
     if (stopThinkingRef.current) {
@@ -1228,7 +1285,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
               </div>
             </div>
           ) : null}
-          <div className="chat-input-shell">
+          <div className="chat-input-shell" ref={inputShellRef}>
             <button
               className="image-ocr-button"
               type="button"
@@ -1292,6 +1349,22 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
                 }
               }}
             />
+            {selectedImagePreview ? (
+              <div className="input-image-preview">
+                <img src={selectedImagePreview} alt="pasted" />
+                <button
+                  type="button"
+                  className="input-image-preview-clear"
+                  onClick={() => {
+                    setSelectedImageFile(null)
+                    setSelectedImagePreview('')
+                    setOcrState(null)
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ) : null}
           </div>
           {ocrState ? (
             <div className={`ocr-float ${ocrState.status}`} title={ocrState.name}>

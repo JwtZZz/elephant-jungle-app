@@ -801,12 +801,17 @@ def work_assistant_message(
     try:
         if user is None:
             raise HTTPException(status_code=401, detail="Not authenticated")
-        return handle_work_assistant_message(
+        result = handle_work_assistant_message(
             user=user,
             message=req.message,
             session_id=req.session_id,
             language=req.language,
         )
+        # Save chat message so task-creation conversations appear in history
+        assistant_msg = (result.get("assistant_message") or "").strip()
+        if assistant_msg:
+            save_chat_message(user["id"], req.message, assistant_msg)
+        return result
     except HTTPException:
         raise
     except PermissionError as exc:

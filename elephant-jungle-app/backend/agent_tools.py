@@ -70,7 +70,11 @@ def _start_mcp():
     _MCP_REQ_ID = 0
 
     backend_dir = os.path.dirname(os.path.abspath(__file__))
-    venv_mcp = os.path.join(backend_dir, "venv", "bin", "mcp")
+    venv_dir = os.path.join(backend_dir, "..", ".venv")
+    venv_mcp = os.path.join(venv_dir, "bin", "mcp")
+    # Fallback: check backend/venv (legacy layout)
+    if not os.path.isfile(venv_mcp):
+        venv_mcp = os.path.join(backend_dir, "venv", "bin", "mcp")
     server = os.path.join(backend_dir, "mcp_server.py")
 
     _MCP_PROC = subprocess.Popen(
@@ -616,13 +620,11 @@ def _execute_via_mcp(name: str, args: dict) -> str:
             return "\n".join(lines)
 
         elif name == "get_news_headlines":
-            import json
-            items = json.loads(raw) if isinstance(raw, str) else raw
+            items = _parse_json_objects(raw) if isinstance(raw, str) else raw
             return _format_news_items(items)
 
         elif name == "get_news_by_topic":
-            import json
-            items = json.loads(raw) if isinstance(raw, str) else raw
+            items = _parse_json_objects(raw) if isinstance(raw, str) else raw
             return _format_news_items(items)
 
         else:

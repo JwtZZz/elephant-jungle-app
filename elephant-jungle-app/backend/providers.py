@@ -302,7 +302,60 @@ def _parse_ocr_payload_text(payload: dict) -> str:
     return _extract_message_text(message)
 
 
+def _gemini_vision(image_data_url: str, prompt: str | None = None) -> str:
+    """Use Google Gemini 2.5 Flash for image understanding (vision + reasoning)."""
+    api_key = _must_env("GEMINI_API_KEY")
+    model = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash-001")
+    url = os.getenv(
+        "GEMINI_VISION_URL",
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    )
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    system_prompt = (
+        "You are a vision assistant. Analyze the image carefully and answer accurately. "
+        "If there is text in the image, read and transcribe it faithfully. "
+        "If the user asks a question about the image, answer based on what you see. "
+        "Be concise and precise."
+    )
+    user_text = prompt.strip() if isinstance(prompt, str) and prompt.strip() else "请详细描述这张图片的内容，包括所有可见的文字、物体、场景和细节。"
+
+    data = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_data_url}},
+                    {"type": "text", "text": user_text},
+                ],
+            },
+        ],
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "stream": False,
+    }
+
+    with httpx.Client(timeout=120) as client:
+        resp = client.post(url, headers=headers, json=data)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    choices = payload.get("choices", [])
+    if not choices:
+        raise RuntimeError("Gemini vision returned no choices.")
+    message = choices[0].get("message", {})
+    text = _extract_message_text(message)
+    if not text:
+        raise RuntimeError("Gemini vision did not return readable text.")
+    return text
+
+
 def ocr_image_data_url(image_data_url: str, prompt: str | None = None) -> str:
+    provider = os.getenv("VISION_PROVIDER", "dashscope").strip().lower()
+    if provider == "gemini":
+        return _gemini_vision(image_data_url, prompt=prompt)
     api_key = _must_env("DASHSCOPE_API_KEY")
     configured_model = os.getenv("ALI_OCR_MODEL", "").strip()
     fallback_models = os.getenv("ALI_OCR_FALLBACK_MODELS", "qwen-vl-ocr,qwen-vl-plus").strip()
@@ -320,9 +373,8 @@ def ocr_image_data_url(image_data_url: str, prompt: str | None = None) -> str:
 
     instructions = [item for item in [
         prompt.strip() if isinstance(prompt, str) and prompt.strip() else "",
-        "Extract all visible text from this image. Return plain text only. Preserve line breaks where useful.",
-        "Read the image carefully and transcribe every visible word, number, symbol, and punctuation mark. Return plain text only. If text is faint, small, rotated, or partially obscured, still provide the best-effort transcription.",
-        "This is an OCR task. Output only the text seen in the image, line by line. Do not explain. Do not summarize. If you can read even part of the text, return that partial transcription.",
+        "请仔细分析这张图片，描述你看到的所有内容：包括文字、物体、场景、颜色、布局、人物等细节。如果图片中有文字，请完整转录出来。",
+        "Describe this image in detail: all visible text, objects, scenes, colors, layout, and any notable elements.",
     ] if item]
 
     last_payload: dict | None = None
