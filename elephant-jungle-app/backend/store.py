@@ -26,6 +26,19 @@ DOCUMENT_COLUMNS = {
 CHUNK_COLUMNS = {
     "chunk_index": "INTEGER NOT NULL DEFAULT 0",
 }
+USER_COLUMNS = {
+    "memory_summary": "TEXT DEFAULT ''",
+    "long_term_memory": "TEXT DEFAULT ''",
+}
+CHAT_MESSAGE_COLUMNS = {
+    "session_id": "TEXT DEFAULT ''",
+    "intent": "TEXT DEFAULT ''",
+    "mode": "TEXT DEFAULT ''",
+    "tool_calls_json": "TEXT DEFAULT '[]'",
+    "tool_results_json": "TEXT DEFAULT '[]'",
+    "errors_json": "TEXT DEFAULT '[]'",
+    "state_transitions_json": "TEXT DEFAULT '[]'",
+}
 
 
 def get_conn() -> sqlite3.Connection:
@@ -126,7 +139,8 @@ def init_db() -> None:
             )
         ensure_columns(conn, "documents", DOCUMENT_COLUMNS)
         ensure_columns(conn, "chunks", CHUNK_COLUMNS)
-        ensure_columns(conn, "users", {"memory_summary": "TEXT DEFAULT ''"})
+        ensure_columns(conn, "users", USER_COLUMNS)
+        ensure_columns(conn, "chat_messages", CHAT_MESSAGE_COLUMNS)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS work_sessions (
@@ -334,6 +348,8 @@ def load_all_chunks() -> list[dict]:
                 "region": row["region"] or "",
                 "source_type": row["source_type"] or "",
                 "language": row["language"] or "",
+                "heading_path": "",
+                "chunk_type": "paragraph",
             },
         }
         for row in rows
@@ -390,6 +406,8 @@ def search_chunks(query_embedding: list[float], top_k: int) -> list[dict]:
                 "region": safe_metadata.get("region", ""),
                 "source_type": safe_metadata.get("source_type", ""),
                 "language": safe_metadata.get("language", ""),
+                "heading_path": safe_metadata.get("heading_path", ""),
+                "chunk_type": safe_metadata.get("chunk_type", "paragraph"),
             }
         )
     return hits
@@ -427,10 +445,24 @@ def create_user(email: str) -> dict:
 def get_memory_summary(user_id: int) -> str:
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT memory_summary FROM users WHERE id = ?",
+            """
+            SELECT
+                COALESCE(NULLIF(long_term_memory, ''), memory_summary, '') AS memory_text
+            FROM users
+            WHERE id = ?
+            """,
             (user_id,),
         ).fetchone()
-    return (row["memory_summary"] or "") if row else ""
+    return (row["memory_text"] or "") if row else ""
+
+
+def get_long_term_memory(user_id: int) -> str:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT long_term_memory FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    return (row["long_term_memory"] or "") if row else ""
 
 
 def save_memory_summary(user_id: int, summary: str) -> None:
@@ -441,11 +473,56 @@ def save_memory_summary(user_id: int, summary: str) -> None:
         )
 
 
-def save_chat_message(user_id: int, user_content: str, bot_content: str) -> int:
+def save_long_term_memory(user_id: int, memory: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET long_term_memory = ?, memory_summary = ? WHERE id = ?",
+            (memory, memory, user_id),
+        )
+
+
+def save_chat_message(
+    user_id: int,
+    user_content: str,
+    bot_content: str,
+    *,
+    session_id: str = "",
+    intent: str = "",
+    mode: str = "",
+    tool_calls: list[dict] | None = None,
+    tool_results: list[dict] | None = None,
+    errors: list[dict] | None = None,
+    state_transitions: list[str] | None = None,
+) -> int:
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO chat_messages(user_id, user_content, bot_content) VALUES(?, ?, ?)",
-            (user_id, user_content, bot_content),
+            """
+            INSERT INTO chat_messages(
+                user_id,
+                user_content,
+                bot_content,
+                session_id,
+                intent,
+                mode,
+                tool_calls_json,
+                tool_results_json,
+                errors_json,
+                state_transitions_json
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                user_content,
+                bot_content,
+                session_id,
+                intent,
+                mode,
+                json.dumps(tool_calls or [], ensure_ascii=False),
+                json.dumps(tool_results or [], ensure_ascii=False),
+                json.dumps(errors or [], ensure_ascii=False),
+                json.dumps(state_transitions or [], ensure_ascii=False),
+            ),
         )
         return int(cur.lastrowid)
 
@@ -463,6 +540,50 @@ def get_chat_history(user_id: int, limit: int = 100, offset: int = 0) -> list[di
             (user_id, limit, offset),
         ).fetchall()
     return [dict(row) for row in reversed(rows)]
+
+
+def get_conversation_history(session_id: str, user_id: int | None = None) -> list[dict]:
+    if not session_id:
+        return []
+
+    params: list[object] = [session_id]
+    where_clause = "session_id = ?"
+    if user_id is not None:
+        where_clause += " AND user_id = ?"
+        params.append(user_id)
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                id,
+                user_id,
+                session_id,
+                intent,
+                mode,
+                user_content,
+                bot_content,
+                tool_calls_json,
+                tool_results_json,
+                errors_json,
+                state_transitions_json,
+                created_at
+            FROM chat_messages
+            WHERE {where_clause}
+            ORDER BY id ASC
+            """,
+            tuple(params),
+        ).fetchall()
+
+    history: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        item["tool_calls"] = _json_loads_list(item.pop("tool_calls_json", ""))
+        item["tool_results"] = _json_loads_list(item.pop("tool_results_json", ""))
+        item["errors"] = _json_loads_list(item.pop("errors_json", ""))
+        item["state_transitions"] = _json_loads_list(item.pop("state_transitions_json", ""))
+        history.append(item)
+    return history
 
 
 def get_chat_history_count(user_id: int) -> int:
@@ -486,6 +607,16 @@ def _json_loads(raw: str | None) -> dict:
         return value if isinstance(value, dict) else {}
     except Exception:
         return {}
+
+
+def _json_loads_list(raw: str | None) -> list:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, list) else []
+    except Exception:
+        return []
 
 
 def _hydrate_work_session(row: sqlite3.Row | None) -> dict | None:

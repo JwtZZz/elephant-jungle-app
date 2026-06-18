@@ -8,6 +8,17 @@ INTENT_MARKET = "market"
 INTENT_KNOWLEDGE = "knowledge"
 INTENT_GENERAL = "general"
 INTENT_MIXED = "mixed"
+INTENT_TRADING = "trading"
+
+_TRADING_KEYWORDS = [
+    "买入", "卖出", "做多", "做空", "开仓", "平仓", "建仓",
+    "止盈", "止损", "挂单", "盯", "监控", "盯盘",
+    "赚了多少", "亏了多少", "持仓", "仓位",
+    "策略", "自动交易", "trading", "bot",
+    "模拟仓", "模拟盘", "交易",
+    "帮我买", "帮我卖", "帮我盯",
+    "收益率", "盈亏", "pnl", "profit",
+]
 
 _MARKET_KEYWORDS = [
     "价格", "行情", "涨", "跌", "多少钱", "市值", "k线", "k-line", "K线",
@@ -20,7 +31,6 @@ _MARKET_KEYWORDS = [
     "happened", "happening",
     "solana", "比特币",
     "币安", "okx", "交易所", "去哪个所",
-    "买", "卖", "做多", "做空",
     "合约", "现货", "期权",
     "gas", "gas费", "手续费",
     "空投", "airdop", "发币",
@@ -46,6 +56,7 @@ _KNOWLEDGE_KEYWORDS = [
 _CLASSIFY_PROMPT = """Analyze the user's question about cryptocurrency. Output exactly one word.
 
 market — asks about real-time data: price, chart, trading, news, trending, whales, outlook/prospects of specific coins, comparisons of coins' performance
+trading — asks to create a trading strategy, set up alerts for buying/selling, check portfolio/pnl, monitor positions, or automate trades
 knowledge — asks about concepts, principles, technical docs, how things work, definitions, author info
 general — greeting, chit-chat, opinions, questions without specific knowledge or data needs
 mixed — needs BOTH real-time data AND knowledge to fully answer (e.g. "how is Bitcoin doing and what is its halving cycle?")
@@ -58,9 +69,13 @@ def _keyword_classify(query: str) -> str | None:
     """Fast keyword pass. Returns None when ambiguous."""
     q = query.lower()
 
+    has_trading = any(kw in q for kw in _TRADING_KEYWORDS)
     has_market = any(kw in q for kw in _MARKET_KEYWORDS)
     has_knowledge = any(kw in q for kw in _KNOWLEDGE_KEYWORDS)
 
+    # Trading intent takes priority — "帮我盯着BTC" is clearly trading even if BTC is a ticker
+    if has_trading:
+        return INTENT_TRADING
     if has_market and has_knowledge:
         return INTENT_MIXED
     if has_market:
@@ -96,7 +111,7 @@ def classify_intent(query: str) -> str:
             temperature=0.1,
         )
         content = (msg.get("content") or "").strip().lower()
-        if content in (INTENT_MARKET, INTENT_KNOWLEDGE, INTENT_GENERAL, INTENT_MIXED):
+        if content in (INTENT_MARKET, INTENT_KNOWLEDGE, INTENT_GENERAL, INTENT_MIXED, INTENT_TRADING):
             return content
         return INTENT_GENERAL
     except Exception:

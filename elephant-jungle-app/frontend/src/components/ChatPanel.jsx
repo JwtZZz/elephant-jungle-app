@@ -96,7 +96,6 @@ const COPY = {
     timeout: 'Request timed out, please retry.',
     backendError: 'Backend error',
     imageOcr: 'Image OCR',
-    imagePasted: 'Pasted image',
     imageAttached: 'Ready to send',
     ocrReading: 'Reading image...',
     ocrReady: 'OCR ready',
@@ -106,6 +105,8 @@ const COPY = {
     workCreated: 'Task created and saved in Work.',
     workConfirmHint: 'Reply "confirm" to save this task in Work.',
     workLoginRequired: 'Please login first. Work tasks are tied to your account and email.',
+    workNoTasks: 'You do not have any active Work tasks right now.',
+    workTasksIntro: 'Your current Work tasks:',
   },
   zh: {
     welcome: "Hello, I'm your Elephant Jungle assistant. 你好，请问需要什么帮助？",
@@ -131,7 +132,6 @@ const COPY = {
     timeout: '请求超时，请重试。',
     backendError: '后端错误',
     imageOcr: '图片识别',
-    imagePasted: '粘贴的图片',
     imageAttached: '待发送',
     ocrReading: '正在识别图片...',
     ocrReady: '识别完成',
@@ -141,6 +141,8 @@ const COPY = {
     workCreated: '任务已创建，并已保存到 Work。',
     workConfirmHint: '回复“确认”就会保存到 Work。',
     workLoginRequired: '请先登录。Work 任务会绑定到你的账号和邮箱。',
+    workNoTasks: '你当前还没有活动中的 Work 任务。',
+    workTasksIntro: '你当前的 Work 任务如下：',
   },
 }
 
@@ -235,6 +237,46 @@ function isWorkTaskIntent(text) {
   return (hasWorkVerb && hasTrigger && hasPrice) || (mentionsWork && hasTrigger)
 }
 
+function isWorkListIntent(text) {
+  const normalized = String(text || '').trim().toLowerCase()
+  return /(^|[\s，。？！,.!?])(我的任务|当前任务|我有什么任务|有哪些任务|查看任务|列出任务|任务列表|我的提醒|当前提醒|有哪些提醒|what tasks|my tasks|current tasks|list tasks|show tasks|active tasks|my alerts|current alerts)([\s，。？！,.!?]|$)/i.test(normalized)
+}
+
+function formatWorkTaskList(tasks, language, copy) {
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return copy.workNoTasks
+  }
+
+  const lines = [copy.workTasksIntro]
+  for (const task of tasks) {
+    if (!task || typeof task !== 'object') continue
+    if (task.workflow_type === 'cron_email') {
+      const asset = task.asset_symbol || '?'
+      const cron = task.cron_expression || ''
+      lines.push(
+        language === 'zh'
+          ? `${lines.length}. ${asset} 定时报告（${cron || '未设置时间'}）`
+          : `${lines.length}. ${asset} scheduled report (${cron || 'no schedule'})`,
+      )
+      continue
+    }
+
+    const asset = task.asset_symbol || '?'
+    const operator = task.operator === 'below'
+      ? (language === 'zh' ? '跌破' : 'below')
+      : (language === 'zh' ? '涨破' : 'above')
+    const threshold = task.threshold_value ?? '?'
+    const currency = task.threshold_currency || 'USD'
+    lines.push(
+      language === 'zh'
+        ? `${lines.length}. ${asset} ${operator} ${threshold} ${currency}`
+        : `${lines.length}. ${asset} ${operator} ${threshold} ${currency}`,
+    )
+  }
+
+  return lines.join('\n')
+}
+
 async function readJsonResponse(response, fallbackMessage) {
   const contentType = response.headers.get('content-type') || ''
   if (!contentType.includes('application/json')) {
@@ -291,7 +333,6 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const workSessionRef = useRef('')
   const workDraftRef = useRef(null)
   const textInputRef = useRef(null)
-  const inputShellRef = useRef(null)
   const topbarRef = useRef(null)
 
   const { spriteMode, boost, cruise, pauseSprite, resumeSprite } = useSpriteOrbit(
@@ -333,8 +374,9 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     })
   }
 
-  const askBackend = async (query, controller, options = {}, onStatus = null) => {
+  const askBackend = async (query, controller, options = {}, handlers = {}) => {
     const { useRag = true } = options
+    const { onStatus = null, onAnswerDelta = null, onAnswerComplete = null } = handlers
     let didTimeout = false
     const timeoutId = window.setTimeout(() => {
       didTimeout = true
@@ -353,6 +395,24 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         workHeaders.Authorization = `Bearer ${token}`
       }
 
+      if (isWorkListIntent(query)) {
+        const response = await fetch(`${apiBase}/work/tasks`, {
+          method: 'GET',
+          headers: workHeaders,
+          credentials: 'include',
+          signal: controller.signal,
+        })
+        const payload = await readJsonResponse(response, copy.requestFailed)
+        if (!response.ok) {
+          if (response.status === 401) throw new Error(copy.workLoginRequired)
+          throw new Error(payload.detail || copy.requestFailed)
+        }
+        return {
+          answer: formatWorkTaskList(payload.tasks || [], language, copy),
+          usedDelta: false,
+        }
+      }
+
       if (isWorkConfirmIntent(query) && workSessionRef.current && workDraftRef.current) {
         const response = await fetch(`${apiBase}/work/tasks/confirm`, {
           method: 'POST',
@@ -369,7 +429,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         workSessionRef.current = ''
         workDraftRef.current = null
         window.dispatchEvent(new CustomEvent('work-tasks-updated', { detail: payload.task }))
-        return copy.workCreated
+        return { answer: copy.workCreated, usedDelta: false }
       }
 
       if (isWorkTaskIntent(query)) {
@@ -392,7 +452,10 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         workSessionRef.current = payload.session_id || ''
         workDraftRef.current = payload.draft_task || null
         const assistantMessage = payload.assistant_message || copy.noAnswer
-        return payload.needs_confirmation ? `${assistantMessage}\n\n${copy.workConfirmHint}` : assistantMessage
+        return {
+          answer: payload.needs_confirmation ? `${assistantMessage}\n\n${copy.workConfirmHint}` : assistantMessage,
+          usedDelta: false,
+        }
       }
 
       const response = await fetch(`${apiBase}/chat/stream`, {
@@ -416,6 +479,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
       const decoder = new TextDecoder()
       let buffer = ''
       let answerText = ''
+      let usedDelta = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -444,8 +508,19 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
             const parsed = JSON.parse(eventData)
             if (eventType === 'intent' || eventType === 'status' || eventType === 'tool_call' || eventType === 'tool_result') {
               if (onStatus) onStatus(parsed.message || parsed.text || '')
+            } else if (eventType === 'answer_delta') {
+              const delta = parsed.text || ''
+              if (delta) {
+                usedDelta = true
+                answerText += delta
+                if (onAnswerDelta) onAnswerDelta(delta, answerText)
+              }
             } else if (eventType === 'answer') {
-              answerText = parsed.text || ''
+              const finalText = parsed.text || ''
+              if (!usedDelta) {
+                answerText = finalText
+              }
+              if (onAnswerComplete) onAnswerComplete(finalText || answerText, usedDelta)
             } else if (eventType === 'error') {
               throw new Error(parsed.message || copy.requestFailed)
             }
@@ -455,7 +530,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         }
       }
 
-      return answerText || copy.noAnswer
+      return { answer: answerText || copy.noAnswer, usedDelta }
     } catch (error) {
       if (error.name === 'AbortError') {
         if (didTimeout) {
@@ -524,8 +599,18 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
   const frameDelays = useMemo(() => [55, 65, 75, 85, 95, 110, 125, 145, 175, 210, 250], [])
 
   const stopThinkingRef = useRef(null)
+  const stopAssistantTextRef = useRef(null)
+  const assistantWatchdogRef = useRef(null)
 
   const streamThinkingText = (messageId) => {
+    if (assistantWatchdogRef.current) {
+      window.clearTimeout(assistantWatchdogRef.current)
+      assistantWatchdogRef.current = null
+    }
+    if (stopAssistantTextRef.current) {
+      window.clearTimeout(stopAssistantTextRef.current)
+      stopAssistantTextRef.current = null
+    }
     if (stopThinkingRef.current) {
       window.clearTimeout(stopThinkingRef.current)
       stopThinkingRef.current = null
@@ -563,11 +648,20 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
 
   const streamAssistantText = (messageId, fullText, query, options = {}) => {
     const { hideActions = false } = options
+    const safeText = String(fullText ?? '')
+    if (assistantWatchdogRef.current) {
+      window.clearTimeout(assistantWatchdogRef.current)
+      assistantWatchdogRef.current = null
+    }
+    if (stopAssistantTextRef.current) {
+      window.clearTimeout(stopAssistantTextRef.current)
+      stopAssistantTextRef.current = null
+    }
     if (stopThinkingRef.current) {
       window.clearTimeout(stopThinkingRef.current)
       stopThinkingRef.current = null
     }
-    const chars = [...fullText]
+    const chars = [...safeText]
     let revealed = 0
     setMessages((prev) =>
       prev.map((m) =>
@@ -578,20 +672,21 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     )
     scrollToBottom()
 
-    const intervalId = window.setInterval(() => {
+    const tick = () => {
       revealed += 1
       if (revealed >= chars.length) {
-        window.clearInterval(intervalId)
+        stopAssistantTextRef.current = null
         setMessages((prev) =>
           prev.map((m) =>
             m.id === messageId
-              ? { ...m, text: fullText, thinking: false, hideActions, hiddenWhilePending: false }
+              ? { ...m, text: safeText, thinking: false, hideActions, hiddenWhilePending: false }
               : m,
           ),
         )
         scrollToBottom()
         return
       }
+
       setMessages((prev) =>
         prev.map((m) =>
           m.id === messageId
@@ -600,7 +695,13 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
         ),
       )
       scrollToBottom()
-    }, 20)
+
+      const nextChar = chars[revealed] || ''
+      const delay = /\s/.test(nextChar) ? 14 : 24
+      stopAssistantTextRef.current = window.setTimeout(tick, delay)
+    }
+
+    stopAssistantTextRef.current = window.setTimeout(tick, 24)
   }
 
   useEffect(() => {
@@ -995,62 +1096,16 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
     })
   }, [copy.welcome])
 
-  // Native paste listener for images
-  useEffect(() => {
-    const handlePaste = (event) => {
-      alert('PASTE DETECTED! items=' + (event.clipboardData?.items?.length || 0))
-      // Show visual feedback that paste was detected
-      setOcrState({ name: 'paste fired: ' + (event.clipboardData?.items?.length || 0) + ' items', status: 'loading' })
-
-      const items = event.clipboardData?.items
-      let imageFile = null
-
-      // Try to find image from clipboard items
-      if (items) {
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i]
-          if (item.type.startsWith('image/')) {
-            event.preventDefault()
-            const file = item.getAsFile()
-            if (file) {
-              imageFile = new File([file], `pasted-image-${Date.now()}.png`, { type: file.type })
-            }
-            break
-          }
-        }
-      }
-
-      if (!imageFile) {
-        setTimeout(() => setOcrState(null), 3000)
-        return
-      }
-      setSelectedImageFile(imageFile)
-      readFileAsDataUrl(imageFile)
-        .then((dataUrl) => {
-          setSelectedImagePreview(dataUrl)
-          setOcrState({ name: copy.imagePasted, status: 'attached' })
-        })
-        .catch((error) => {
-          console.error('Paste preview failed', error)
-          setSelectedImageFile(null)
-          setSelectedImagePreview('')
-          setOcrState(null)
-        })
-    }
-
-    // Listen at document level capture phase - most reliable way to catch paste
-    document.addEventListener('paste', handlePaste, true)
-    // Direct assignment as ultimate fallback
-    document.onpaste = handlePaste
-
-    return () => {
-      document.removeEventListener('paste', handlePaste, true)
-      document.onpaste = null
-    }
-  }, [copy.imagePasted])
-
   const interruptActiveReply = () => {
     activeRunIdRef.current += 1
+    if (assistantWatchdogRef.current) {
+      window.clearTimeout(assistantWatchdogRef.current)
+      assistantWatchdogRef.current = null
+    }
+    if (stopAssistantTextRef.current) {
+      window.clearTimeout(stopAssistantTextRef.current)
+      stopAssistantTextRef.current = null
+    }
     if (stopThinkingRef.current) {
       window.clearTimeout(stopThinkingRef.current)
       stopThinkingRef.current = null
@@ -1144,15 +1199,138 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
           : `[Image OCR]\n${extractedText}`
       }
 
-      const answer = await askBackend(backendQuery, controller, { useRag }, (statusText) => {
-	        setMessages((prev) =>
-	          prev.map((m) =>
-	            m.id === botId ? { ...m, statusText } : m,
-	          ),
-	        )
-	      })
+      let receivedDelta = false
+      let pendingDeltaText = ''
+      let renderedDeltaText = ''
+      let deltaStreamFinished = false
+      let finalDeltaAnswer = ''
+      let lastDeltaProgressAt = Date.now()
+      let resolveDeltaDrain = null
+      const deltaDrainPromise = new Promise((resolve) => {
+        resolveDeltaDrain = resolve
+      })
+
+      const finishDeltaStream = () => {
+        if (assistantWatchdogRef.current) {
+          window.clearTimeout(assistantWatchdogRef.current)
+          assistantWatchdogRef.current = null
+        }
+        if (resolveDeltaDrain) {
+          const done = resolveDeltaDrain
+          resolveDeltaDrain = null
+          done()
+        }
+      }
+
+      const scheduleAssistantWatchdog = () => {
+        if (assistantWatchdogRef.current) {
+          window.clearTimeout(assistantWatchdogRef.current)
+        }
+        assistantWatchdogRef.current = window.setTimeout(() => {
+          const stalled = Date.now() - lastDeltaProgressAt > 500
+          if (runId !== activeRunIdRef.current || activeBotIdRef.current !== botId) {
+            finishDeltaStream()
+            return
+          }
+          if (pendingDeltaText && !stopAssistantTextRef.current && stalled) {
+            stopAssistantTextRef.current = window.setTimeout(pumpDeltaText, 16)
+          } else if (deltaStreamFinished && !pendingDeltaText && !stopAssistantTextRef.current) {
+            const finalText = finalDeltaAnswer || renderedDeltaText || copy.noAnswer
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === botId
+                  ? { ...m, text: finalText, thinking: false, hideActions: false, hiddenWhilePending: false, query: backendQuery }
+                  : m,
+              ),
+            )
+            scrollToBottom()
+            finishDeltaStream()
+            return
+          }
+          scheduleAssistantWatchdog()
+        }, 220)
+      }
+
+      const pumpDeltaText = () => {
+        if (runId !== activeRunIdRef.current || activeBotIdRef.current !== botId) {
+          stopAssistantTextRef.current = null
+          finishDeltaStream()
+          return
+        }
+
+        if (!pendingDeltaText) {
+          stopAssistantTextRef.current = null
+          if (deltaStreamFinished) {
+            const finalText = finalDeltaAnswer || renderedDeltaText || copy.noAnswer
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === botId
+                  ? { ...m, text: finalText, thinking: false, hideActions: false, hiddenWhilePending: false, query: backendQuery }
+                  : m,
+              ),
+            )
+            scrollToBottom()
+            stopAssistantTextRef.current = null
+            finishDeltaStream()
+          }
+          return
+        }
+
+        renderedDeltaText += pendingDeltaText[0]
+        pendingDeltaText = pendingDeltaText.slice(1)
+        lastDeltaProgressAt = Date.now()
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === botId
+              ? { ...m, text: renderedDeltaText, thinking: false, hideActions: true, hiddenWhilePending: false, query: backendQuery }
+              : m,
+          ),
+        )
+        scrollToBottom()
+
+        const nextChar = pendingDeltaText[0] || ''
+        const delay = /\s/.test(nextChar) ? 10 : 22
+        stopAssistantTextRef.current = window.setTimeout(pumpDeltaText, delay)
+      }
+
+      const result = await askBackend(backendQuery, controller, { useRag }, {
+        onStatus: (statusText) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === botId ? { ...m, statusText } : m,
+            ),
+          )
+        },
+        onAnswerDelta: (delta, fullText) => {
+          receivedDelta = true
+          if (stopThinkingRef.current) {
+            window.clearTimeout(stopThinkingRef.current)
+            stopThinkingRef.current = null
+          }
+          finalDeltaAnswer = fullText
+          pendingDeltaText += delta
+          lastDeltaProgressAt = Date.now()
+          if (!stopAssistantTextRef.current) {
+            stopAssistantTextRef.current = window.setTimeout(pumpDeltaText, 16)
+          }
+          scheduleAssistantWatchdog()
+        },
+        onAnswerComplete: (finalText, usedDelta) => {
+          finalDeltaAnswer = finalText
+          if (!usedDelta) return
+          deltaStreamFinished = true
+          scheduleAssistantWatchdog()
+          if (!pendingDeltaText && !stopAssistantTextRef.current) {
+            pumpDeltaText()
+          }
+        },
+      })
       if (runId !== activeRunIdRef.current) return
-      streamAssistantText(botId, answer, backendQuery)
+      if (receivedDelta || result.usedDelta) {
+        await deltaDrainPromise
+      } else {
+        streamAssistantText(botId, result.answer, backendQuery)
+      }
       snapViewportToTop()
       setSelectedImageFile(null)
       setSelectedImagePreview('')
@@ -1285,7 +1463,7 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
               </div>
             </div>
           ) : null}
-          <div className="chat-input-shell" ref={inputShellRef}>
+          <div className="chat-input-shell">
             <button
               className="image-ocr-button"
               type="button"
@@ -1349,22 +1527,6 @@ export default function ChatPanel({ apiBase, language, setLanguage, mobileOnly =
                 }
               }}
             />
-            {selectedImagePreview ? (
-              <div className="input-image-preview">
-                <img src={selectedImagePreview} alt="pasted" />
-                <button
-                  type="button"
-                  className="input-image-preview-clear"
-                  onClick={() => {
-                    setSelectedImageFile(null)
-                    setSelectedImagePreview('')
-                    setOcrState(null)
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            ) : null}
           </div>
           {ocrState ? (
             <div className={`ocr-float ${ocrState.status}`} title={ocrState.name}>

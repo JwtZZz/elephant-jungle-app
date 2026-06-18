@@ -273,6 +273,107 @@ def _chat_completion_raw(
     return message
 
 
+def _chat_completion_stream(
+    messages: list[dict],
+    temperature: float = 0.2,
+    provider: str | None = None,
+) -> Iterable[str]:
+    """Stream tokens from the LLM one content-fragment at a time.
+
+    Yields strings — each is a piece of incremental content from the model.
+    Does NOT support tool_calls (use ``_chat_completion_raw`` for that).
+    """
+    provider = provider or _get_chat_provider()
+
+    if provider == "ollama":
+        api_key = "ollama"
+        model = os.getenv("OLLAMA_MODEL", "gemma3:4b").strip()
+        url = (os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip().rstrip("/")
+               + "/v1/chat/completions")
+    elif provider == "dashscope":
+        api_key = _must_env("DASHSCOPE_API_KEY")
+        model = os.getenv("ALI_CHAT_MODEL", "qwen3.5-flash")
+        url = os.getenv(
+            "ALI_CHAT_URL",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        )
+    elif provider == "nvidia":
+        api_key = _must_env("NVIDIA_API_KEY")
+        model = os.getenv("NVIDIA_MODEL", "z-ai/glm5")
+        url = os.getenv(
+            "NVIDIA_CHAT_URL",
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+        )
+    elif provider == "minimax":
+        api_key = _must_env("MINIMAX_API_KEY")
+        model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+        url = os.getenv(
+            "MINIMAX_CHAT_URL",
+            "https://api.minimax.chat/v1/text/chatcompletion_v2",
+        )
+    elif provider == "bigmodel":
+        api_key = _must_env("BIGMODEL_API_KEY")
+        model = os.getenv("BIGMODEL_MODEL", "glm-4-flash")
+        url = os.getenv(
+            "BIGMODEL_CHAT_URL",
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        )
+    else:
+        raise RuntimeError(f"Unsupported CHAT_PROVIDER: {provider}")
+
+    data: dict = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": 2048,
+        "stream": True,
+    }
+
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    timeout = httpx.Timeout(60.0, connect=5.0) if provider == "ollama" else httpx.Timeout(120.0)
+
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            with client.stream("POST", url, headers=headers, json=data) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload_str = line[6:].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = _get_delta(chunk)
+                    if delta:
+                        yield delta
+    except httpx.ConnectError:
+        if provider == "ollama":
+            raise RuntimeError(f"调用本地模型失败（{model}），请检查 Ollama 是否已启动")
+        raise
+    except httpx.TimeoutException:
+        if provider == "ollama":
+            raise RuntimeError(f"调用本地模型超时（{model}），请检查 Ollama 状态")
+        raise
+
+
+def _get_delta(chunk: dict) -> str | None:
+    """Extract incremental content delta from a streaming chunk."""
+    choices = chunk.get("choices")
+    if not choices:
+        return None
+    delta = choices[0].get("delta", {})
+    content = delta.get("content")
+    if isinstance(content, str) and content:
+        return content
+    reasoning = delta.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning:
+        return reasoning
+    return None
+
+
 def _extract_message_text(message: dict) -> str:
     content = message.get("content", "")
     if isinstance(content, str) and content.strip():

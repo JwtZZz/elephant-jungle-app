@@ -1,0 +1,20 @@
+{
+    "files.associations": {
+        "*.py": "python",
+        "*.js": "javascript",
+        "*.jsx": "javascriptreact",
+        "*.css": "css",
+        "*.html": "html",
+        "*.json": "json",
+        "*.md": "markdown"
+    },
+    "workbench.editorAssociations": {
+        "*.py": "default",
+        "*.js": "default",
+        "*.jsx": "default",
+        "*.css": "default",
+        "*.html": "default",
+        "*.json": "default",
+        "*.md": "default"
+    }
+}

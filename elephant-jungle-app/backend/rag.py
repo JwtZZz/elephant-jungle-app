@@ -423,24 +423,56 @@ def chat(
     history_messages: list[dict] | None = None,
     memory_summary: str | None = None,
 ) -> dict:
+    state_transitions: list[str] = ["receive_query"]
     if not use_rag:
+        state_transitions.append("skip_rag_general_answer")
         answer = generate_general_answer(query=query, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
-        return {"answer": answer, "contexts": [], "sources": [], "mode": "general"}
+        return {
+            "answer": answer,
+            "contexts": [],
+            "sources": [],
+            "mode": "general",
+            "tool_calls": [],
+            "tool_results": [],
+            "errors": [],
+            "state_transitions": state_transitions,
+        }
 
     lang = _detect_query_language(query)
+    state_transitions.append("vector_search")
     hits = search(query=query, top_k=top_k, language=lang)
     top_score = hits[0]["score"] if hits else -1.0
     sources = build_sources(hits)
 
     if top_score < FALLBACK_SCORE_THRESHOLD:
+        state_transitions.append("fallback_general_answer")
         answer = generate_general_answer(query=query, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
         answer = f"{answer}\n\n命中分数：{top_score:.3f}"
-        return {"answer": answer, "contexts": hits, "sources": sources, "mode": "general"}
+        return {
+            "answer": answer,
+            "contexts": hits,
+            "sources": sources,
+            "mode": "general",
+            "tool_calls": [],
+            "tool_results": [],
+            "errors": [],
+            "state_transitions": state_transitions,
+        }
 
     context_text = _build_context(hits)
+    state_transitions.append("rag_answer")
     answer = generate_answer(query=query, contexts=[context_text], provider=provider, history_messages=history_messages, memory_summary=memory_summary)
     answer = f"{answer}\n\n命中分数：{top_score:.3f}"
-    return {"answer": answer, "contexts": hits, "sources": sources, "mode": "rag"}
+    return {
+        "answer": answer,
+        "contexts": hits,
+        "sources": sources,
+        "mode": "rag",
+        "tool_calls": [],
+        "tool_results": [],
+        "errors": [],
+        "state_transitions": state_transitions,
+    }
 
 
 MAX_AGENT_TURNS = 6
@@ -522,6 +554,10 @@ def agent_chat(
         on_event: Optional callback(event_type, message) for streaming status updates.
     """
     _emit = lambda t, m: on_event(t, m) if on_event else None
+    tool_trace: list[dict] = []
+    tool_results: list[dict] = []
+    errors: list[dict] = []
+    state_transitions: list[str] = ["receive_query", "build_agent_prompt"]
 
     system_content = AGENT_SYSTEM_PROMPT
     if user and user.get("email"):
@@ -534,6 +570,7 @@ def agent_chat(
     kb_context: str | None = None
     if intent != "market" and provider != "ollama":
         _emit("status", "正在搜索知识库...")
+        state_transitions.append("presearch_knowledge")
         try:
             hits = search(query, top_k=3)
             if hits and hits[0]["score"] >= FALLBACK_SCORE_THRESHOLD:
@@ -546,6 +583,7 @@ def agent_chat(
     news_context: str | None = None
     if intent == "market" and _TIME_SENSITIVE.search(query):
         _emit("status", "正在获取最新新闻...")
+        state_transitions.append("prefetch_news")
         try:
             from news_aggregator import fetch_by_topic as _fetch_topic, _COIN_ALIASES
             # Try to detect which coin the user is asking about
@@ -587,13 +625,22 @@ def agent_chat(
 
     for turn in range(MAX_AGENT_TURNS):
         _emit("status", "正在思考下一步操作...")
+        state_transitions.append(f"agent_turn_{turn + 1}")
         message = _chat_completion_raw(messages, tools=TOOL_DEFINITIONS, provider=provider)
         tool_calls = message.get("tool_calls")
 
         if not tool_calls:
             _emit("status", "正在生成回答...")
             content = message.get("content", "") or ""
-            return {"answer": content.strip(), "mode": "agent"}
+            state_transitions.append("final_answer")
+            return {
+                "answer": content.strip(),
+                "mode": "agent",
+                "tool_calls": tool_trace,
+                "tool_results": tool_results,
+                "errors": errors,
+                "state_transitions": state_transitions,
+            }
 
         messages.append({
             "role": "assistant",
@@ -607,16 +654,36 @@ def agent_chat(
                 func_args = json.loads(tc["function"]["arguments"])
             except json.JSONDecodeError:
                 func_args = {}
+            tool_trace.append({"name": func_name, "arguments": func_args})
 
             zh_name = TOOL_NAMES_ZH.get(func_name, func_name)
             _emit("tool_call", f"正在{zh_name}...")
-            tool_result = execute_tool(func_name, func_args, user=user)
-            _emit("tool_result", f"{zh_name}完成")
+            try:
+                state_transitions.append(f"tool_call:{func_name}")
+                tool_result = execute_tool(func_name, func_args, user=user)
+                tool_results.append({"name": func_name, "result": tool_result})
+                _emit("tool_result", f"{zh_name}完成")
+                state_transitions.append(f"tool_result:{func_name}")
+            except Exception as exc:
+                tool_result = f"工具 {func_name} 调用失败：{exc}"
+                errors.append({"stage": func_name, "message": str(exc)})
+                _emit("tool_result", f"{zh_name}失败")
+                state_transitions.append(f"tool_error:{func_name}")
 
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
                 "content": tool_result,
             })
+
+    state_transitions.append("agent_turn_limit_reached")
+    return {
+        "answer": "对话超过最大推理轮次，请简化问题后重试。",
+        "mode": "agent",
+        "tool_calls": tool_trace,
+        "tool_results": tool_results,
+        "errors": errors,
+        "state_transitions": state_transitions,
+    }
 
     return {"answer": "抱歉，处理您的请求时超出了最大轮数，请重新提问。", "mode": "agent"}

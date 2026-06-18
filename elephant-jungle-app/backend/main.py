@@ -16,20 +16,18 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from queue import Queue, Empty
+from memory_manager import MemoryManager
 
 import auth
 from intent import INTENT_GENERAL, INTENT_KNOWLEDGE, INTENT_MARKET, INTENT_MIXED, classify_intent
-from rag import DEFAULT_TOP_K, agent_chat, chat, ingest_document, search, update_memory_summary
+from rag import DEFAULT_TOP_K, agent_chat, chat, ingest_document, search
 from store import (
     create_user,
     find_user_by_email,
     find_user_by_id,
     get_chat_history,
     get_chat_history_count,
-    get_memory_summary,
     init_db,
-    save_chat_message,
-    save_memory_summary,
     sync_chroma_index,
 )
 from providers import ocr_image_data_url, translate_text, validate_provider_env
@@ -126,6 +124,8 @@ class ChatRequest(BaseModel):
     use_rag: bool = True
     use_agent: bool = False
     auto_intent: bool = True
+    session_id: str | None = None
+    debug_memory: bool = False
 
 
 class OcrImageRequest(BaseModel):
@@ -801,17 +801,12 @@ def work_assistant_message(
     try:
         if user is None:
             raise HTTPException(status_code=401, detail="Not authenticated")
-        result = handle_work_assistant_message(
+        return handle_work_assistant_message(
             user=user,
             message=req.message,
             session_id=req.session_id,
             language=req.language,
         )
-        # Save chat message so task-creation conversations appear in history
-        assistant_msg = (result.get("assistant_message") or "").strip()
-        if assistant_msg:
-            save_chat_message(user["id"], req.message, assistant_msg)
-        return result
     except HTTPException:
         raise
     except PermissionError as exc:
@@ -941,7 +936,49 @@ def _build_agent_history(user: dict | None) -> list[dict] | None:
 def _load_memory(user: dict | None) -> str | None:
     if not user:
         return None
-    return get_memory_summary(user["id"])
+    manager = MemoryManager()
+    return manager.get_long_term_memory(user["id"])
+
+
+def _resolve_chat_session_id(req: ChatRequest, user: dict | None) -> str:
+    if req.session_id and req.session_id.strip():
+        return req.session_id.strip()
+    if user:
+        return f"user:{user['id']}:default"
+    return ""
+
+
+def _build_memory_pipeline(
+    *,
+    req: ChatRequest,
+    user: dict | None,
+    query: str,
+    intent: str | None,
+    provider: str | None,
+) -> dict:
+    manager = MemoryManager(provider=provider)
+    session_id = _resolve_chat_session_id(req, user)
+    user_id = user["id"] if user else None
+    l2 = manager.get_long_term_memory(user_id)
+    l3 = manager.get_conversation_history(session_id, user_id) if user_id and session_id else []
+    l4 = manager.vector_search(query, top_k=req.top_k) if query.strip() else []
+    l1 = manager.build_working_memory(l2, l3, l4, query=query, intent=intent)
+    return {
+        "manager": manager,
+        "session_id": session_id,
+        "l2": l2,
+        "l3": l3,
+        "l4": l4,
+        "l1": l1,
+        "history_messages": manager.history_as_messages(l3),
+        "memory_prompt": manager.render_working_memory(l1),
+        "debug": {
+            "l2": l2,
+            "l3": l3,
+            "l4": l4,
+            "l1": l1,
+        },
+    }
 
 
 def _is_task_request(query: str) -> bool:
@@ -976,6 +1013,46 @@ def _is_task_request(query: str) -> bool:
     return False
 
 
+def _is_task_list_request(query: str) -> bool:
+    q = query.strip().lower()
+    if not q:
+        return False
+    return bool(re.search(
+        r'(我的任务|当前任务|我有什么任务|有哪些任务|查看任务|列出任务|任务列表|我的提醒|当前提醒|有哪些提醒|what tasks|my tasks|current tasks|list tasks|show tasks|active tasks|my alerts|current alerts)',
+        q,
+        re.I,
+    ))
+
+
+def _render_task_list_answer(tasks: list[dict], language: str) -> str:
+    if not tasks:
+        return "你当前还没有活动中的 Work 任务。" if language.startswith("zh") else "You do not have any active Work tasks right now."
+
+    lines = ["你当前的 Work 任务如下："] if language.startswith("zh") else ["Your current Work tasks:"]
+    for index, task in enumerate(tasks, start=1):
+        if task.get("workflow_type") == "cron_email":
+            asset = task.get("asset_symbol") or "?"
+            cron = task.get("cron_expression") or ""
+            if language.startswith("zh"):
+                lines.append(f"{index}. {asset} 定时报告（{cron or '未设置时间'}）")
+            else:
+                lines.append(f"{index}. {asset} scheduled report ({cron or 'no schedule'})")
+            continue
+
+        asset = task.get("asset_symbol") or "?"
+        operator = task.get("operator") or ""
+        threshold = task.get("threshold_value")
+        currency = task.get("threshold_currency") or "USD"
+        if language.startswith("zh"):
+            op_label = "跌破" if operator == "below" else "涨破"
+            lines.append(f"{index}. {asset} {op_label} {threshold} {currency}")
+        else:
+            op_label = "below" if operator == "below" else "above"
+            lines.append(f"{index}. {asset} {op_label} {threshold} {currency}")
+
+    return "\n".join(lines)
+
+
 # Track active work session per user for multi-turn task creation.
 # Maps user_id → session_id. Cleared on task confirmation or error.
 _active_work_sessions: dict[int, str] = {}
@@ -996,13 +1073,54 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
         if req.auto_intent:
             intent = classify_intent(query)
 
+        memory_pipeline = _build_memory_pipeline(
+            req=req,
+            user=user,
+            query=query,
+            intent=intent,
+            provider=provider,
+        )
+        manager: MemoryManager = memory_pipeline["manager"]
+        history_messages = memory_pipeline["history_messages"]
+        memory_prompt = memory_pipeline["memory_prompt"]
+        session_id = memory_pipeline["session_id"]
+
+        # Task-list intercept: let chat answer from Work tasks directly.
+        if user and _is_task_list_request(query):
+            lang = "zh" if re.search(r'[一-鿿]', query) else "en"
+            tasks = list_user_work_tasks(user, include_completed=False)
+            answer = _render_task_list_answer(tasks, lang)
+            result = {
+                "answer": answer,
+                "contexts": [],
+                "sources": [],
+                "mode": "work_task_list",
+                "intent": intent,
+                "tool_calls": [],
+                "tool_results": [],
+                "errors": [],
+                "state_transitions": ["receive_query", "work_task_list_intercept", "work_task_list_response"],
+            }
+            manager.write_history_log(
+                user_id=user["id"],
+                session_id=session_id,
+                user_email=user.get("email", ""),
+                user_input=query,
+                assistant_output=answer,
+                intent=intent or "",
+                mode="work_task_list",
+                state_transitions=result["state_transitions"],
+            )
+            if req.debug_memory:
+                result["memory_debug"] = memory_pipeline["debug"]
+            return result
+
         # Task-creation intercept: route to work_service directly,
         # bypassing the LLM agent. On follow-up messages the active
         # session_id provides continuity so "btc" / "my@email.com"
         # completes the authoring graph across multiple turns.
         active_session_id = _active_work_sessions.get(user["id"]) if user else None
         if user and (_is_task_request(query) or active_session_id):
-            task_memory_summary = _load_memory(user)
             try:
                 lang = "zh" if re.search(r'[一-鿿]', query) else "en"
                 work_session = handle_work_assistant_message(
@@ -1029,35 +1147,45 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
                     "sources": [],
                     "mode": "work_task",
                     "intent": intent,
+                    "tool_calls": [],
+                    "tool_results": [],
+                    "errors": [],
+                    "state_transitions": ["receive_query", "work_task_intercept", "work_task_response"],
                 }
                 if user:
-                    save_chat_message(user["id"], query, answer)
-                    new_summary = update_memory_summary(
-                        old_summary=(task_memory_summary or ""),
+                    manager.write_history_log(
+                        user_id=user["id"],
+                        session_id=session_id,
+                        user_email=user.get("email", ""),
+                        user_input=query,
+                        assistant_output=answer,
+                        intent=intent or "",
+                        mode="work_task",
+                        state_transitions=result["state_transitions"],
+                    )
+                    manager.reflect_and_update_memory(
+                        user_id=user["id"],
+                        working_memory=memory_pipeline["l1"],
                         query=query,
                         answer=answer,
-                        provider=provider,
+                        current_memory=memory_pipeline["l2"],
                     )
-                    if new_summary:
-                        save_memory_summary(user["id"], new_summary)
+                if req.debug_memory:
+                    result["memory_debug"] = memory_pipeline["debug"]
                 return result
             except Exception:
                 if user:
                     _active_work_sessions.pop(user["id"], None)
 
-        # Always load conversation history for logged-in users
-        history_messages = _build_agent_history(user)
-        memory_summary = _load_memory(user)
-
         if intent == INTENT_GENERAL:
-            result = chat(query=query, use_rag=False, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
+            result = chat(query=query, use_rag=False, provider=provider, history_messages=history_messages, memory_summary=memory_prompt)
         elif intent == INTENT_KNOWLEDGE:
-            result = chat(query=query, top_k=req.top_k, use_rag=True, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
+            result = chat(query=query, top_k=req.top_k, use_rag=True, provider=provider, history_messages=history_messages, memory_summary=memory_prompt)
         elif intent == INTENT_MARKET:
             result = agent_chat(
                 query=query,
                 history_messages=history_messages,
-                memory_summary=memory_summary,
+                memory_summary=memory_prompt,
                 intent=intent,
                 provider=provider,
                 user=user,
@@ -1066,7 +1194,7 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
             result = agent_chat(
                 query=query,
                 history_messages=history_messages,
-                memory_summary=memory_summary,
+                memory_summary=memory_prompt,
                 provider=provider,
                 user=user,
             )
@@ -1074,26 +1202,39 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
             result = agent_chat(
                 query=query,
                 history_messages=history_messages,
-                memory_summary=memory_summary,
+                memory_summary=memory_prompt,
                 provider=provider,
                 user=user,
             )
         else:
-            result = chat(query=query, top_k=req.top_k, use_rag=req.use_rag, provider=provider, history_messages=history_messages, memory_summary=memory_summary)
+            result = chat(query=query, top_k=req.top_k, use_rag=req.use_rag, provider=provider, history_messages=history_messages, memory_summary=memory_prompt)
 
         if intent:
             result["intent"] = intent
+        if req.debug_memory:
+            result["memory_debug"] = memory_pipeline["debug"]
 
         if user:
-            save_chat_message(user["id"], query, result.get("answer", ""))
-            new_summary = update_memory_summary(
-                old_summary=(_load_memory(user) or ""),
+            manager.write_history_log(
+                user_id=user["id"],
+                session_id=session_id,
+                user_email=user.get("email", ""),
+                user_input=query,
+                assistant_output=result.get("answer", ""),
+                intent=intent or "",
+                mode=result.get("mode", ""),
+                tool_calls=result.get("tool_calls"),
+                tool_results=result.get("tool_results"),
+                errors=result.get("errors"),
+                state_transitions=result.get("state_transitions"),
+            )
+            manager.reflect_and_update_memory(
+                user_id=user["id"],
+                working_memory=memory_pipeline["l1"],
                 query=query,
                 answer=result.get("answer", ""),
-                provider=provider,
+                current_memory=memory_pipeline["l2"],
             )
-            if new_summary:
-                save_memory_summary(user["id"], new_summary)
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -1104,11 +1245,27 @@ def chat_route(req: ChatRequest, user: dict | None = Depends(get_current_user)) 
 @app.post("/chat/stream")
 def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user)) -> StreamingResponse:
     """SSE streaming chat — emits status/tool_call/answer events during processing."""
+    sse_headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
 
     def _sse(event, data):
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+    def _enqueue_answer_stream(event_queue: Queue, text: str) -> None:
+        content = str(text or "")
+        if not content:
+            event_queue.put(("answer", {"text": ""}))
+            return
+        for ch in content:
+            event_queue.put(("answer_delta", {"text": ch}))
+            time.sleep(0.012 if ch.strip() else 0.006)
+        event_queue.put(("answer", {"text": content}))
+
     def generate():
+        yield ": stream-open\n\n"
         event_queue = Queue()
 
         def on_event(etype, message):
@@ -1125,17 +1282,47 @@ def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user))
                 # 本地模型跳过 RAG
                 use_rag = req.use_rag if provider != "ollama" else False
 
-                memory_summary = _load_memory(user)
-
                 intent = None
                 if req.auto_intent:
                     intent = classify_intent(query)
                     event_queue.put(("intent", {"intent": intent, "message": f"意图: {intent}"}))
 
+                memory_pipeline = _build_memory_pipeline(
+                    req=req,
+                    user=user,
+                    query=query,
+                    intent=intent,
+                    provider=provider,
+                )
+                manager: MemoryManager = memory_pipeline["manager"]
+                history_messages = memory_pipeline["history_messages"]
+                memory_prompt = memory_pipeline["memory_prompt"]
+                session_id = memory_pipeline["session_id"]
+                if req.debug_memory:
+                    event_queue.put(("memory_debug", memory_pipeline["debug"]))
+
+                # Task-list keyword intercept (streaming variant)
+                if user and _is_task_list_request(query):
+                    lang = "zh" if re.search(r'[一-鿿]', query) else "en"
+                    tasks = list_user_work_tasks(user, include_completed=False)
+                    answer = _render_task_list_answer(tasks, lang)
+                    _enqueue_answer_stream(event_queue, answer)
+                    manager.write_history_log(
+                        user_id=user["id"],
+                        session_id=session_id,
+                        user_email=user.get("email", ""),
+                        user_input=query,
+                        assistant_output=answer,
+                        intent=intent or "",
+                        mode="work_task_list",
+                        state_transitions=["receive_query", "work_task_list_intercept", "work_task_list_response"],
+                    )
+                    event_queue.put(("done", {}))
+                    return
+
                 # Task-creation keyword intercept (streaming variant)
                 active_session_id = _active_work_sessions.get(user["id"]) if user else None
                 if user and (_is_task_request(query) or active_session_id):
-                    task_memory_summary = _load_memory(user)
                     try:
                         lang = "zh" if re.search(r'[一-鿿]', query) else "en"
                         work_session = handle_work_assistant_message(
@@ -1152,17 +1339,25 @@ def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user))
                                 answer += f"（定时：{task['cron_expression']}）"
                         else:
                             answer = work_session.get("assistant_message") or ""
-                        event_queue.put(("answer", {"text": answer}))
+                        _enqueue_answer_stream(event_queue, answer)
                         if user:
-                            save_chat_message(user["id"], query, answer)
-                            new_summary = update_memory_summary(
-                                old_summary=(task_memory_summary or ""),
+                            manager.write_history_log(
+                                user_id=user["id"],
+                                session_id=session_id,
+                                user_email=user.get("email", ""),
+                                user_input=query,
+                                assistant_output=answer,
+                                intent=intent or "",
+                                mode="work_task",
+                                state_transitions=["receive_query", "work_task_intercept", "work_task_response"],
+                            )
+                            manager.reflect_and_update_memory(
+                                user_id=user["id"],
+                                working_memory=memory_pipeline["l1"],
                                 query=query,
                                 answer=answer,
-                                provider=provider,
+                                current_memory=memory_pipeline["l2"],
                             )
-                            if new_summary:
-                                save_memory_summary(user["id"], new_summary)
                         event_queue.put(("done", {}))
                         return
                     except Exception:
@@ -1170,38 +1365,47 @@ def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user))
                             _active_work_sessions.pop(user["id"], None)
 
                 if intent == "general":
-                    result = chat(query=query, use_rag=False, provider=provider, history_messages=_build_agent_history(user), memory_summary=memory_summary)
-                    event_queue.put(("answer", {"text": result["answer"]}))
+                    result = chat(query=query, use_rag=False, provider=provider, history_messages=history_messages, memory_summary=memory_prompt)
+                    _enqueue_answer_stream(event_queue, result["answer"])
                 elif intent == "knowledge":
-                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider, history_messages=_build_agent_history(user), memory_summary=memory_summary)
-                    event_queue.put(("answer", {"text": result["answer"]}))
+                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider, history_messages=history_messages, memory_summary=memory_prompt)
+                    _enqueue_answer_stream(event_queue, result["answer"])
                 elif intent in ("market", "mixed") or req.use_agent:
-                    history_messages = _build_agent_history(user)
-                    memory_summary = _load_memory(user)
                     result = agent_chat(
                         query=query,
                         history_messages=history_messages,
-                        memory_summary=memory_summary,
+                        memory_summary=memory_prompt,
                         intent=intent,
                         on_event=on_event,
                         provider=provider,
                         user=user,
                     )
-                    event_queue.put(("answer", {"text": result["answer"]}))
+                    _enqueue_answer_stream(event_queue, result["answer"])
                 else:
-                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider, history_messages=_build_agent_history(user), memory_summary=memory_summary)
-                    event_queue.put(("answer", {"text": result["answer"]}))
+                    result = chat(query=query, top_k=req.top_k, use_rag=use_rag, provider=provider, history_messages=history_messages, memory_summary=memory_prompt)
+                    _enqueue_answer_stream(event_queue, result["answer"])
 
                 if user:
-                    save_chat_message(user["id"], query, result.get("answer", ""))
-                    new_summary = update_memory_summary(
-                        old_summary=(_load_memory(user) or ""),
+                    manager.write_history_log(
+                        user_id=user["id"],
+                        session_id=session_id,
+                        user_email=user.get("email", ""),
+                        user_input=query,
+                        assistant_output=result.get("answer", ""),
+                        intent=intent or "",
+                        mode=result.get("mode", ""),
+                        tool_calls=result.get("tool_calls"),
+                        tool_results=result.get("tool_results"),
+                        errors=result.get("errors"),
+                        state_transitions=result.get("state_transitions"),
+                    )
+                    manager.reflect_and_update_memory(
+                        user_id=user["id"],
+                        working_memory=memory_pipeline["l1"],
                         query=query,
                         answer=result.get("answer", ""),
-                        provider=provider,
+                        current_memory=memory_pipeline["l2"],
                     )
-                    if new_summary:
-                            save_memory_summary(user["id"], new_summary)
             except Exception as exc:
                 event_queue.put(("error", {"message": str(exc)}))
             finally:
@@ -1219,7 +1423,7 @@ def chat_stream(req: ChatRequest, user: dict | None = Depends(get_current_user))
             except Empty:
                 yield _sse("heartbeat", {})
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=sse_headers)
 
 @app.post("/ocr/image")
 def ocr_image_route(req: OcrImageRequest) -> dict:
